@@ -69,7 +69,7 @@ export default function Home(){
   },[selectedBacktest])
 
   const activeJob=useMemo(()=>snapshot?.jobs?.find(j=>j.status==='RUNNING'||j.status==='QUEUED'),[snapshot])
-  const v5Running=Boolean(snapshot?.jobs?.find(j=>j.kind==='META_V5'&&(j.status==='RUNNING'||j.status==='QUEUED')))
+  const candidateRunning=Boolean(snapshot?.jobs?.find(j=>j.kind==='META_V6'&&(j.status==='RUNNING'||j.status==='QUEUED')))
 
   const refreshAll=async()=>{
     setRefreshing(true)
@@ -83,9 +83,9 @@ export default function Home(){
     }
   }
 
-  const runV5=async()=>{
+  const runCandidate=async()=>{
     try{
-      await api('/api/jobs/meta-v5',{method:'POST'})
+      await api('/api/jobs/meta-v6',{method:'POST'})
       await loadSnapshot(false)
     }catch(e){
       setError(e.message)
@@ -111,7 +111,7 @@ export default function Home(){
       {view!=='dashboard'&&activeJob&&<JobBanner job={{...activeJob,label:JOB_LABELS[activeJob.kind]||activeJob.kind}}/>}
       {view==='dashboard'&&<DashboardView snapshot={snapshot} onSignal={openSignal}/>}
       {view==='research'&&<ResearchView snapshot={snapshot}/>}
-      {view==='backtests'&&<BacktestsView snapshot={snapshot} detail={backtestDetail} onSelect={setSelectedBacktest} onRunV5={runV5} running={v5Running}/>}
+      {view==='backtests'&&<BacktestsView snapshot={snapshot} detail={backtestDetail} onSelect={setSelectedBacktest} onRunCandidate={runCandidate} running={candidateRunning}/>} 
       {view==='signals'&&<SignalsView snapshot={snapshot} onSignal={openSignal}/>}
       {view==='paper'&&<PaperView snapshot={snapshot}/>}
       {view==='system'&&<SystemView snapshot={snapshot} onRefresh={refreshAll} refreshing={refreshing}/>}
