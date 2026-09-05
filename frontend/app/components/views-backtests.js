@@ -12,8 +12,9 @@ function BacktestDetail({detail}){
   const positions=safeArray(detail.position_ledger)
   const orders=safeArray(detail.order_ledger)
   const rebalances=safeArray(detail.rebalance_ledger)
-  const simulation=detail.meta_v6?.simulation||detail.meta_v5?.simulation
-  const target=detail.meta_v6?.target
+  const simulation=detail.meta_v7?.simulation||detail.meta_v6?.simulation||detail.meta_v5?.simulation
+  const target=detail.meta_v7?.target||detail.meta_v6?.target
+  const riskOverlay=detail.meta_v7?.risk_overlay
   const stats=[
     ['CAGR',pct(metrics.cagr)],
     ['Sharpe',num(metrics.sharpe,2)],
@@ -48,6 +49,11 @@ function BacktestDetail({detail}){
           <div><span className="text-slate-400">Alpha target :</span> {target.alpha}</div>
           <div><span className="text-slate-400">Meta label :</span> {target.meta_label}</div>
           <div><span className="text-slate-400">Coût intégré au label :</span> {target.round_trip_cost_bps} bps round-trip</div>
+        </div>}
+        {riskOverlay&&<div className="mt-3 rounded-xl border border-emerald-300/10 bg-emerald-400/[0.03] p-3 text-[11px] leading-5 text-slate-500">
+          <div className="font-semibold text-emerald-300">V7 risk overlay</div>
+          <div className="mt-1">Corrélation {riskOverlay.corr_lookback_days}j · cap {num(riskOverlay.corr_cap,2)} · max {riskOverlay.max_names} titres · poids max {pct(riskOverlay.single_name_weight_cap)}</div>
+          <div>Volatility scaling + exposition marché dynamique · {riskOverlay.method}</div>
         </div>}
       </div>}
       <div className="h-72 p-5">
@@ -95,7 +101,7 @@ function BacktestDetail({detail}){
 export function BacktestsView({snapshot,detail,onSelect,onRunCandidate,running}){
   const rows=safeArray(snapshot?.backtests)
   return <div className="space-y-6">
-    <SectionHeading title="Backtests" description="V5 reste le benchmark. V6 est le challenger execution-aligned : on ne le retiendra que s'il améliore Sharpe/drawdown sans casser la robustesse." action={<Button kind="primary" icon={RefreshCcw} disabled={running} onClick={onRunCandidate}>{running?'V6 en cours…':'Tester META V6'}</Button>}/>
+    <SectionHeading title="Backtests" description="V6 est maintenant la référence performance. V7 garde exactement son alpha et teste uniquement une couche de diversification/risque pour réduire les grosses claques et la dépendance aux paniers corrélés." action={<Button kind="primary" icon={RefreshCcw} disabled={running} onClick={onRunCandidate}>{running?'V7 en cours…':'Tester META V7'}</Button>}/>
     <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
       <Panel className="h-fit overflow-hidden">
         <PanelHeader title="Registry" eyebrow={rows.length+' runs'}/>
