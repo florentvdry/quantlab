@@ -120,10 +120,8 @@ def execute_job(key:str):
             validation=validation_report(p, panel=panel, bundle=bundle)
             _save_state(db,"validation.latest",{"status":"COMPLETED",**validation})
 
-            def signal_progress(value,message):
-                mapped=86+int(min(100,max(0,float(value)))*0.10)
-                update(db,row,progress=min(96,mapped),result_json=safe_dumps({"message":"Autopilot / Signals — "+str(message)}))
-            signals=latest_meta_v5_signals(panel=panel,progress=signal_progress)
+            update(db,row,progress=90,result_json=safe_dumps({"message":"Autopilot — Current signals from continuous walk-forward"}))
+            signals=bundle["signals"]
             _save_state(db,"meta_v5.latest_signals",signals)
             result={
                 "mode":"AUTO",
