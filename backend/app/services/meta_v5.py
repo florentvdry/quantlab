@@ -23,6 +23,7 @@ V5_PORTFOLIO = {
     "long_count": 15,
     "short_count": 0,
     "rebalance_days": 10,
+    "warmup_days": 0,
     "commission_bps": 6.0,
     "slippage_bps": 5.0,
     "gross_exposure": 1.0,
@@ -37,10 +38,10 @@ V5_PORTFOLIO = {
 }
 
 V5_CONFIG = {
-    "min_train_days": 504,
-    "validation_days": 126,
-    "test_days": 126,
+    "min_train_days": 126,
+    "validation_days": 63,
     "embargo_days": 20,
+    "model_refresh_days": 20,
     "ewma_span": 5,
     "meta_threshold_grid": [0.50, 0.55, 0.60, 0.65],
     "lgbm_members": 3,
