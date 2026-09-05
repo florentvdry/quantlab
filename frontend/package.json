@@ -1,6 +1,17 @@
 {
-  "name":"quantlab-web","private":true,"version":"1.0.0",
-  "scripts":{"dev":"next dev -H 0.0.0.0","build":"next build","start":"next start -H 0.0.0.0"},
-  "dependencies":{"next":"15.5.2","react":"19.1.1","react-dom":"19.1.1","recharts":"3.1.2"},
-  "devDependencies":{}
+  "name": "quantlab-web",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0"
+  },
+  "dependencies": {
+    "next": "15.5.24",
+    "react": "19.1.8",
+    "react-dom": "19.1.8",
+    "recharts": "3.1.2"
+  },
+  "devDependencies": {}
 }
