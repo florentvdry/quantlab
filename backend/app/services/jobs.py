@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, traceback, uuid
+import json, traceback, uuid, threading, time
 from datetime import datetime
 from redis import Redis
 from app.core.config import settings
@@ -12,6 +12,7 @@ from app.services.meta_v5 import run_meta_v5, latest_meta_v5_signals, meta_v5_va
 
 QUEUE="quantlab:jobs"
 WORKER_HEARTBEAT="quantlab:worker:heartbeat"
+DEDUP_KINDS={"AUTO_BOOTSTRAP","META_V5","META_V5_SIGNALS","VALIDATION","DAILY_PIPELINE","DATA_REFRESH","SEC_REFRESH"}
 
 RESEARCH_JOB_KINDS={
     "BACKTEST","META_V5","V4_BACKTEST","ADAPTIVE_BACKTEST","BASELINE",
@@ -44,10 +45,14 @@ def redis_client(): return Redis.from_url(settings.redis_url,decode_responses=Tr
 def enqueue(kind:str,payload:dict|None=None):
     db=SessionLocal(); key=str(uuid.uuid4())
     try:
+        if kind in DEDUP_KINDS:
+            active=db.query(JobRun).filter(JobRun.kind==kind,JobRun.status.in_(["QUEUED","RUNNING"])).order_by(JobRun.id.desc()).first()
+            if active:
+                return {"id":active.id,"job_key":active.job_key,"kind":kind,"status":active.status,"deduplicated":True}
         row=JobRun(job_key=key,kind=kind,status="QUEUED",progress=0,payload_json=json.dumps(payload or {}))
         db.add(row); db.commit(); db.refresh(row)
         redis_client().rpush(QUEUE,key)
-        return {"id":row.id,"job_key":key,"kind":kind,"status":"QUEUED"}
+        return {"id":row.id,"job_key":key,"kind":kind,"status":"QUEUED","deduplicated":False}
     finally: db.close()
 
 def update(db,row,**kw):
@@ -217,10 +222,19 @@ def execute_job(key:str):
         update(db,row,status="FAILED",error=str(e),result_json=json.dumps({"message":"Échec","traceback":traceback.format_exc()}),completed_at=datetime.utcnow())
     finally: db.close()
 
-def worker_loop():
-    r=redis_client(); print("QuantLab worker ready",flush=True)
+def _heartbeat_loop():
     while True:
-        r.setex(WORKER_HEARTBEAT,20,datetime.utcnow().isoformat())
+        try:
+            redis_client().setex(WORKER_HEARTBEAT,20,datetime.utcnow().isoformat())
+        except Exception:
+            pass
+        time.sleep(5)
+
+def worker_loop():
+    r=redis_client()
+    threading.Thread(target=_heartbeat_loop,daemon=True,name="quantlab-heartbeat").start()
+    print("QuantLab worker ready",flush=True)
+    while True:
         item=r.blpop(QUEUE,timeout=5)
-        r.setex(WORKER_HEARTBEAT,20,datetime.utcnow().isoformat())
-        if item: execute_job(item[1])
+        if item:
+            execute_job(item[1])
