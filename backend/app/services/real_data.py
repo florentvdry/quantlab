@@ -16,7 +16,7 @@ os.makedirs(DATA_DIR,exist_ok=True)
 
 DEFAULT_UNIVERSE="AAPL MSFT NVDA AMZN META GOOGL GOOG AVGO TSLA BRK.B JPM LLY V WMT XOM MA UNH ORCL COST HD PG JNJ ABBV BAC NFLX CRM KO CVX MRK AMD PEP TMO CSCO ACN MCD IBM GE ABT CAT QCOM INTU AMAT TXN ISRG NOW BKNG SPGI GS RTX HON AMGN LOW PFE DIS NKE SBUX UPS BA DE".split()
 EXCHANGES={"NASDAQ","NYSE","ARCA","AMEX"}
-EXCLUDE_NAME=(" ETF"," ETN"," FUND"," WARRANT"," RIGHTS"," UNIT"," DEPOSITARY")
+EXCLUDE_NAME=(" ETF"," ETN"," FUND"," WARRANT"," RIGHTS"," UNIT")
 
 def headers():
     return {"APCA-API-KEY-ID":settings.alpaca_api_key,"APCA-API-SECRET-KEY":settings.alpaca_secret_key}
@@ -44,7 +44,7 @@ def _asset_candidates():
         name=" "+str(a.get("name","")).upper()
         if not sym or len(sym)>10 or not re.match(r"^[A-Z0-9.\-]+$",sym):
             continue
-        if a.get("exchange") not in EXCHANGES or not a.get("tradable") or not a.get("shortable"):
+        if a.get("exchange") not in EXCHANGES or not a.get("tradable"):
             continue
         if any(x in name for x in EXCLUDE_NAME):
             continue
@@ -53,7 +53,7 @@ def _asset_candidates():
         out.append(sym)
     return sorted(set(out))
 
-def _rank_universe(candidates):
+def _snapshot_rank(candidates):
     ranked=[]
     for start in range(0,len(candidates),150):
         chunk=candidates[start:start+150]
@@ -74,10 +74,125 @@ def _rank_universe(candidates):
             bar=(snap or {}).get("dailyBar") or (snap or {}).get("prevDailyBar") or {}
             price=float(bar.get("c") or 0)
             volume=float(bar.get("v") or 0)
-            if price>=5 and volume>0:
+            if price>=float(settings.real_universe_min_price) and volume>0:
                 ranked.append((sym,price*volume,price,volume))
     ranked.sort(key=lambda x:x[1],reverse=True)
     return ranked
+
+
+def _quality_history(symbols):
+    if not symbols:
+        return pd.DataFrame()
+    start=(date.today()-timedelta(days=365*4+90)).isoformat()
+    end=date.today().isoformat()
+    rows=[]
+    for chunk0 in range(0,len(symbols),20):
+        chunk=symbols[chunk0:chunk0+20]
+        token=None
+        seen=set()
+        try:
+            while True:
+                params={
+                    "symbols":",".join(chunk),"timeframe":"1Day","start":start,"end":end,
+                    "adjustment":"all","feed":settings.alpaca_feed,"limit":10000,"sort":"asc",
+                }
+                if token:params["page_token"]=token
+                payload=request_json(
+                    "GET",settings.alpaca_data_base_url+"/v2/stocks/bars",
+                    service="Alpaca universe quality bars",params=params,headers=headers(),
+                    timeout=45,retries=2,
+                )
+                for sym,bars in payload.get("bars",{}).items():
+                    for b in bars:
+                        rows.append((pd.Timestamp(b["t"]).tz_convert(None).normalize(),sym,float(b["c"]),float(b["v"])))
+                nxt=payload.get("next_page_token")
+                if not nxt or nxt in seen:break
+                seen.add(nxt);token=nxt
+        except Exception:
+            continue
+    if not rows:return pd.DataFrame()
+    df=pd.DataFrame(rows,columns=["date","symbol","close","volume"]).drop_duplicates(["date","symbol"])
+    df["dollar_volume"]=df["close"]*df["volume"]
+    df=df.sort_values(["symbol","date"])
+    df["ret_1d"]=df.groupby("symbol")["close"].pct_change(fill_method=None)
+    stats=[]
+    for sym,g in df.groupby("symbol"):
+        recent=g.tail(60)
+        vol=float(recent["ret_1d"].std(ddof=1)*np.sqrt(252)) if len(recent)>20 else np.nan
+        stats.append({
+            "symbol":sym,
+            "history_sessions":int(len(g)),
+            "last_price":float(g["close"].iloc[-1]),
+            "median_dollar_volume_60":float(recent["dollar_volume"].median()) if len(recent) else 0.0,
+            "volatility_60":vol,
+        })
+    return pd.DataFrame(stats)
+
+
+def _quality_rank_universe(candidates):
+    snapshot=_snapshot_rank(candidates)
+    if not snapshot:return []
+    prefilter=int(settings.real_universe_prefilter_size)
+    top=snapshot[:max(prefilter,int(settings.real_universe_size))]
+    symbols=[x[0] for x in top]
+    current_liq={x[0]:x[1] for x in top}
+    stats=_quality_history(symbols)
+    if stats.empty:
+        return [x[0] for x in top[:settings.real_universe_size]]
+
+    stats["current_dollar_volume"]=stats["symbol"].map(current_liq).fillna(0.0)
+    qualified=stats[
+        (stats["history_sessions"]>=int(settings.real_universe_min_history_sessions))
+        &(stats["last_price"]>=float(settings.real_universe_min_price))
+        &(stats["median_dollar_volume_60"]>=float(settings.real_universe_min_median_dollar_volume))
+        &(stats["volatility_60"].fillna(99)<=float(settings.real_universe_max_volatility))
+    ].copy()
+
+    if qualified.empty:
+        return [x[0] for x in top[:settings.real_universe_size]]
+
+    qualified["liq_rank"]=qualified["median_dollar_volume_60"].rank(pct=True)
+    qualified["current_liq_rank"]=qualified["current_dollar_volume"].rank(pct=True)
+    qualified["history_rank"]=qualified["history_sessions"].rank(pct=True)
+    qualified["stability_rank"]=1-qualified["volatility_60"].rank(pct=True)
+    qualified["quality_score"]=(
+        .50*qualified["liq_rank"]
+        +.20*qualified["current_liq_rank"]
+        +.15*qualified["history_rank"]
+        +.15*qualified["stability_rank"]
+    )
+    qualified=qualified.sort_values(["quality_score","median_dollar_volume_60"],ascending=False)
+
+    selected=qualified.head(int(settings.real_universe_size))["symbol"].tolist()
+
+    diagnostics={
+        "generated_at":pd.Timestamp.utcnow().isoformat(),
+        "candidate_count":len(candidates),
+        "prefilter_count":len(symbols),
+        "qualified_count":int(len(qualified)),
+        "selected_count":len(selected),
+        "filters":{
+            "min_price":float(settings.real_universe_min_price),
+            "min_history_sessions":int(settings.real_universe_min_history_sessions),
+            "min_median_dollar_volume_60":float(settings.real_universe_min_median_dollar_volume),
+            "max_volatility_60":float(settings.real_universe_max_volatility),
+        },
+        "top":[
+            {
+                "symbol":row.symbol,
+                "score":round(float(row.quality_score),4),
+                "median_dollar_volume_60":round(float(row.median_dollar_volume_60),2),
+                "history_sessions":int(row.history_sessions),
+                "volatility_60":round(float(row.volatility_60),4),
+            }
+            for row in qualified.head(min(50,len(qualified))).itertuples()
+        ],
+    }
+    tmp=os.path.join(DATA_DIR,"universe_quality.json.tmp")
+    final=os.path.join(DATA_DIR,"universe_quality.json")
+    with open(tmp,"w",encoding="utf-8") as fh:json.dump(diagnostics,fh,indent=2)
+    os.replace(tmp,final)
+    return selected
 
 def universe(force=False):
     path=os.path.join(DATA_DIR,"universe.json")
@@ -92,8 +207,7 @@ def universe(force=False):
 
     syms=[]
     try:
-        ranked=_rank_universe(_asset_candidates())
-        syms=[x[0] for x in ranked[:settings.real_universe_size]]
+        syms=_quality_rank_universe(_asset_candidates())
     except Exception:
         syms=[]
 
@@ -103,7 +217,7 @@ def universe(force=False):
 
     tmp=path+".tmp"
     with open(tmp,"w",encoding="utf-8") as fh:
-        json.dump({"date":date.today().isoformat(),"symbols":syms},fh)
+        json.dump({"date":date.today().isoformat(),"mode":"quality_liquid_v2","symbols":syms},fh)
     os.replace(tmp,path)
     return syms
 
