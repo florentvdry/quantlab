@@ -38,6 +38,7 @@ function BacktestDetail({detail,registry,fetchBacktest}){
       <div className="border-t border-white/6 px-5 py-3 text-xs text-slate-600">
         <div>{detail.dataset?.mode||'—'} · trades {detail.dataset?.backtest_from||detail.dataset?.from||'?'} → {detail.dataset?.backtest_to||detail.dataset?.to||'?'} · {detail.execution_timing||'timing n/a'}</div>
         {detail.dataset?.raw_market_from&&<div className="mt-1 text-slate-700">raw market {detail.dataset.raw_market_from} → {detail.dataset.raw_market_to||'?'} · feature-valid from {detail.dataset.from||'?'}</div>}
+        {detail.dataset?.solid_eligible_symbols_median!=null&&<div className="mt-1 text-slate-700">univers éligible · médiane {num(detail.dataset.solid_eligible_symbols_median,0)} · p10 {num(detail.dataset.solid_eligible_symbols_p10,0)} · latest {num(detail.dataset.solid_eligible_symbols_latest,0)} · depuis {detail.dataset.solid_eligible_from||'?'}</div>}
       </div>
       {simulation&&<div className="border-t border-indigo-300/10 bg-indigo-400/[0.035] px-5 py-4">
         <div className="text-[10px] font-semibold uppercase tracking-[.15em] text-indigo-300">Continuous walk-forward</div>
@@ -80,6 +81,7 @@ function BacktestDetail({detail,registry,fetchBacktest}){
             <th className={thClass}>PF</th>
             <th className={thClass}>Costs</th>
             <th className={thClass}>Risk floor</th>
+            <th className={thClass}>Prob floor</th>
             <th className={thClass}>Mean scale</th>
             <th className={thClass}>Names</th>
           </tr></thead>
@@ -94,6 +96,7 @@ function BacktestDetail({detail,registry,fetchBacktest}){
               <td className={tdClass}>{num(row.profit_factor,2)}</td>
               <td className={tdClass}>{money(row.estimated_costs_usd)}</td>
               <td className={tdClass}>{overlay.market_risk_floor==null?'—':pct(overlay.market_risk_floor)}</td>
+              <td className={tdClass}>{overlay.probability_scale_floor==null?'—':pct(overlay.probability_scale_floor)}</td>
               <td className={tdClass}>{overlay.mean_position_scale==null?'—':pct(overlay.mean_position_scale)}</td>
               <td className={tdClass}>{overlay.mean_selected_names==null?'—':num(overlay.mean_selected_names,1)}</td>
             </tr>
