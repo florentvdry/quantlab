@@ -422,7 +422,11 @@ function strategyVersion(strategy=''){
 function latestCompareOptions(registry){
   const rows=safeArray(registry)
   const pick=needle=>rows.find(row=>String(row.strategy).toLowerCase().includes(needle))
-  return [pick('v5'),pick('v6'),pick('v7 diversified'),pick('v7.1')].filter(Boolean)
+  const v7=rows.find(row=>{
+    const name=String(row.strategy).toLowerCase()
+    return name.includes('v7')&&!name.includes('v7.1')
+  })
+  return [pick('v5'),pick('v6'),v7,pick('v7.1')].filter(Boolean)
 }
 
 function CompareTooltip({active,payload,label,details}){
