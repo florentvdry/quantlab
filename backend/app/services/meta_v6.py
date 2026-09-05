@@ -401,6 +401,7 @@ def _apply_meta(frame: pd.DataFrame, meta: MetaLayerV6) -> pd.DataFrame:
     out = frame.copy()
     prob = meta.predict(out)
     out["v6_meta_probability"] = prob
+    out["v6_threshold"] = float(meta.threshold)
     out["v6_position_scale"] = _size_from_probability(prob, meta.threshold)
 
     accepted = out["v6_meta_probability"] >= float(meta.threshold)
