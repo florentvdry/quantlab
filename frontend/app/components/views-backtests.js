@@ -1,80 +1,11 @@
 'use client'
 
 import { RefreshCcw } from 'lucide-react'
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Badge, Empty, Panel, PanelHeader, SectionHeading, TableWrap, cn, tdClass, thClass, tableClass } from './ui'
 import { Button } from './shell'
 import { BacktestAnalytics } from './backtest-analytics'
 import { money, num, pct, price, safeArray, shortDate } from '../lib/format'
 
-
-function accountSeries(detail){
-  const daily=safeArray(detail?.account_curve)
-  if(daily.length)return daily
-  const rebalances=safeArray(detail?.rebalance_ledger)
-  if(!rebalances.length)return safeArray(detail?.equity_curve).map(row=>({
-    date:row.date,
-    equity_usd:row.equity_usd??((detail?.metrics?.initial_capital_usd||100000)*Number(row.equity||1)),
-    balance_usd:row.equity_usd??((detail?.metrics?.initial_capital_usd||100000)*Number(row.equity||1)),
-    floating_pnl_usd:0,
-  }))
-  const rows=[]
-  rebalances.forEach((row,i)=>{
-    if(i===0)rows.push({date:row.entry_date,equity_usd:row.equity_before_usd,balance_usd:row.equity_before_usd,floating_pnl_usd:0})
-    rows.push({date:row.exit_date,equity_usd:row.equity_after_usd,balance_usd:row.equity_after_usd,floating_pnl_usd:0})
-  })
-  return rows
-}
-
-function compactMoney(v){
-  if(v==null||!Number.isFinite(Number(v)))return ''
-  return new Intl.NumberFormat('fr-FR',{notation:'compact',style:'currency',currency:'USD',maximumFractionDigits:1}).format(Number(v))
-}
-
-function AccountTooltip({active,payload,label}){
-  if(!active||!payload?.length)return null
-  const values=Object.fromEntries(payload.map(item=>[item.dataKey,item.value]))
-  const floating=values.equity_usd!=null&&values.balance_usd!=null?Number(values.equity_usd)-Number(values.balance_usd):null
-  return <div className="rounded-xl border border-white/10 bg-[#11151b]/95 p-3 shadow-2xl backdrop-blur">
-    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[.14em] text-slate-500">{label}</div>
-    <div className="space-y-1.5 text-xs">
-      <div className="flex min-w-[180px] items-center justify-between gap-5"><span className="text-indigo-300">Equity</span><b className="text-white">{money(values.equity_usd)}</b></div>
-      <div className="flex items-center justify-between gap-5"><span className="text-amber-300">Balance</span><b className="text-white">{money(values.balance_usd)}</b></div>
-      {floating!=null&&<div className="flex items-center justify-between gap-5 border-t border-white/6 pt-1.5"><span className="text-slate-500">P&L flottant</span><b className={floating>=0?'text-emerald-300':'text-rose-300'}>{money(floating)}</b></div>}
-    </div>
-  </div>
-}
-
-function AccountCurve({detail}){
-  const data=accountSeries(detail)
-  const hasDaily=safeArray(detail?.account_curve).length>0
-  if(!data.length)return <Empty>Courbe de compte indisponible.</Empty>
-  return <div>
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/6 px-5 py-4">
-      <div>
-        <div className="text-xs font-semibold text-slate-200">Equity & Balance</div>
-        <div className="mt-1 text-[11px] text-slate-600">{hasDaily?'Mark-to-market quotidien · balance réalisée en escalier':'Ancien backtest · courbe historique simplifiée'}</div>
-      </div>
-      <div className="flex items-center gap-4 text-[11px]">
-        <span className="flex items-center gap-2 text-slate-400"><span className="h-2 w-2 rounded-full bg-indigo-400"/>Equity</span>
-        <span className="flex items-center gap-2 text-slate-400"><span className="h-2 w-2 rounded-full bg-amber-300"/>Balance</span>
-      </div>
-    </div>
-    <div className="h-[360px] px-2 pb-5 pr-5">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{top:8,right:8,bottom:0,left:8}}>
-          <CartesianGrid stroke="rgba(148,163,184,.08)" vertical={false}/>
-          <XAxis dataKey="date" minTickGap={42} axisLine={false} tickLine={false} tick={{fontSize:10,fill:'#64748b'}}/>
-          <YAxis domain={['auto','auto']} axisLine={false} tickLine={false} width={74} tickFormatter={compactMoney} tick={{fontSize:10,fill:'#64748b'}}/>
-          <Tooltip content={<AccountTooltip/>}/>
-          <Legend content={()=>null}/>
-          <Line type="monotone" dataKey="equity_usd" name="Equity" stroke="#8b9cff" strokeWidth={2.4} dot={false} activeDot={{r:3}} isAnimationActive={false}/>
-          <Line type="stepAfter" dataKey="balance_usd" name="Balance" stroke="#fbbf24" strokeWidth={1.8} strokeDasharray="5 4" dot={false} activeDot={{r:3}} isAnimationActive={false}/>
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
-  </div>
-}
 
 function BacktestDetail({detail,registry,fetchBacktest}){
   if(!detail)return <Panel><Empty>Sélectionne un backtest pour ouvrir son audit complet.</Empty></Panel>
