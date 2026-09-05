@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: quantlab
       POSTGRES_USER: quantlab
@@ -15,6 +16,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -23,6 +25,7 @@ services:
 
   api:
     build: ./backend
+    restart: unless-stopped
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://quantlab:quantlab@db:5432/quantlab
@@ -37,9 +40,16 @@ services:
     volumes:
       - ./backend:/app
       - quantdata:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   worker:
     build: ./backend
+    restart: unless-stopped
     command: ["python", "-m", "app.worker"]
     env_file: .env
     environment:
@@ -56,40 +66,52 @@ services:
 
   scheduler:
     build: ./backend
+    restart: unless-stopped
     command: ["python", "-m", "app.scheduler"]
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://quantlab:quantlab@db:5432/quantlab
       REDIS_URL: redis://redis:6379/0
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     volumes:
       - ./backend:/app
       - quantdata:/data
 
   trade_stream:
     build: ./backend
+    restart: unless-stopped
     command: ["python", "-m", "app.trade_stream"]
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://quantlab:quantlab@db:5432/quantlab
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     volumes:
       - ./backend:/app
 
   web:
     build: ./frontend
+    restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
       INTERNAL_API_URL: http://api:8000
     ports:
       - "3000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     volumes:
       - ./frontend:/app
       - /app/node_modules
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
 volumes:
   pgdata:
