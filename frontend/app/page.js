@@ -6,7 +6,7 @@ const API=process.env.NEXT_PUBLIC_API_URL||'http://localhost:8000'
 const pct=v=>v==null?'—':(Number(v)*100).toFixed(1)+'%'
 const num=(v,d=3)=>v==null?'—':Number(v).toFixed(d)
 const JOB_LABELS={
-  BACKTEST:'META V2 Backtest',META_V5:'META Ensemble V5',V4_BACKTEST:'META V4 Low-Turnover',ADAPTIVE_BACKTEST:'Adaptive META V3',BASELINE:'Baseline momentum',SWEEP:'Parameter sweep',ROBUSTNESS:'Robustness',
+  AUTO_BOOTSTRAP:'Autopilot QuantLab',BACKTEST:'META V2 Backtest',META_V5:'META Ensemble V5',V4_BACKTEST:'META V4 Low-Turnover',ADAPTIVE_BACKTEST:'Adaptive META V3',BASELINE:'Baseline momentum',SWEEP:'Parameter sweep',ROBUSTNESS:'Robustness',
   TRAIN_RIDGE:'Walk-forward Ridge',TRAIN_HGB:'Walk-forward HGB',FACTOR_SUMMARY:'Factor Research',
   VALIDATION:'Validation Gate',META_V5_SIGNALS:'META V5 Signals',RIDGE_BACKTEST:'Ridge OOS Backtest',HGB_BACKTEST:'HGB OOS Backtest',DATA_REFRESH:'Market data',SEC_REFRESH:'SEC',DAILY_PIPELINE:'Daily Pipeline',
   PAPER_SNAPSHOT:'Paper Snapshot'
@@ -68,7 +68,7 @@ export default function Home(){
       ['/api/dashboard',setDash],['/api/system/status',setSys],['/api/setup',setSetup],['/api/jobs',setJobs],
       ['/api/backtests',setBacktests],['/api/factors/latest',setFactors],['/api/system/datasets',setDatasets],
       ['/api/strategies',setStrategies],['/api/models',setModels],['/api/experiments',setExperiments],
-      ['/api/validation/latest',setValidation],['/api/data/quality',setQuality],['/api/meta-v5/signals',setMetaSignals],['/api/paper/positions',setPositions],
+      ['/api/validation/latest',setValidation],['/api/data/quality',setQuality],['/api/research/factors/latest',setFactorSummary],['/api/meta-v5/signals',setMetaSignals],['/api/paper/positions',setPositions],
       ['/api/paper/orders',setOrders],['/api/paper/fills',setFills],['/api/paper/performance',setPerf]
     ]
     try{
@@ -132,7 +132,7 @@ export default function Home(){
     </div>}
 
     {setup&&!setup.research_unlocked&&<div className="statusBanner warning">
-      <div className="grow"><b>Données de recherche pas encore prêtes</b><div className="muted mini">{setup.feature_store?.message||'Le Feature Store doit être construit.'} Un job de backtest/recherche le reconstruira désormais automatiquement.</div></div>
+      <div className="grow"><b>Autopilot prépare QuantLab</b><div className="muted mini">{setup.feature_store?.message||'Initialisation en cours.'} Tu n'as rien à lancer manuellement : Data → Research → META V5 → Validation → Signals s'enchaînent automatiquement.</div></div>
     </div>}
 
     {tab==='Overview'&&<>
@@ -146,14 +146,11 @@ export default function Home(){
         <Card title="Setup / Readiness">
           {!setup?.steps?.length?<Empty>Aucun état de setup.</Empty>:setup.steps.map(s=><div className="checkRow" key={s.name}><Pill ok={s.ok}>{s.ok?'PASS':'BLOCK'}</Pill><div><b>{s.name}</b><div className="muted mini">{typeof s.detail==='string'?s.detail:''}</div></div></div>)}
         </Card>
-        <Card title="Actions">
-          <div className="actionGrid">
-            <button className="btn" disabled={busy||activeJobs.some(j=>j.kind==='DAILY_PIPELINE')} onClick={()=>postJob('/api/jobs/daily-pipeline?force_market=true','Daily Pipeline',{})}>{activeJobs.some(j=>j.kind==='DAILY_PIPELINE')?'Pipeline en cours…':'Run Daily Pipeline'}</button>
-            <button className="btn" onClick={()=>postJob('/api/jobs/meta-v5','META Ensemble V5')}>Run META V5</button><button className="btn2" onClick={()=>postJob('/api/jobs/v4-backtest','META V4 Low-Turnover',{})}>META V4</button>
-            <button className="btn2" onClick={()=>postJob('/api/jobs/validation','Validation Gate')}>Run Validation</button>
-            <button className="btn2" onClick={()=>setTab('Research')}>Open Research</button>
-          </div>
-          <p className="muted mini">Paper execution reste bloqué tant que la stratégie n’est pas validée et promue.</p>
+        <Card title="Autopilot">
+          <div className="big">{sys?.auto_bootstrap_enabled?'ACTIVE':'OFF'}</div>
+          <p className="muted mini">Au démarrage et lors du refresh quotidien : market data → SEC best-effort → Feature Store → Factor Research → META V5 → Validation → Signals.</p>
+          <div className="row topGap"><button className="btn2" disabled={activeJobs.some(j=>j.kind==='AUTO_BOOTSTRAP')} onClick={()=>postJob('/api/jobs/bootstrap?force_market=true','Autopilot QuantLab',{})}>{activeJobs.some(j=>j.kind==='AUTO_BOOTSTRAP')?'Autopilot en cours…':'Refresh tout maintenant'}</button></div>
+          <p className="muted mini">Les boutons des autres onglets restent disponibles pour les expériences manuelles, mais ils ne sont plus nécessaires au chargement normal.</p>
         </Card>
       </div>
       <Card title="Background Jobs" className="section"><JobsTable jobs={jobs}/></Card>
@@ -162,7 +159,7 @@ export default function Home(){
     {tab==='Data'&&<>
       <div className="two">
         <Card title="Dataset / Feature Versions">
-          {!Object.keys(datasets||{}).length?<Empty>Lance le Daily Pipeline.</Empty>:<table><thead><tr><th>Layer</th><th>Version</th><th>Latest</th><th>Rows</th></tr></thead><tbody>{Object.entries(datasets).map(([k,v])=><tr key={k}><td>{k}</td><td>{v.version||v.status||'—'}</td><td>{v.latest||'—'}</td><td>{v.rows||'—'}</td></tr>)}</tbody></table>}
+          {!Object.keys(datasets||{}).length?<Empty>Autopilot prépare les datasets.</Empty>:<table><thead><tr><th>Layer</th><th>Version</th><th>Latest</th><th>Rows</th></tr></thead><tbody>{Object.entries(datasets).map(([k,v])=><tr key={k}><td>{k}</td><td>{v.version||v.status||'—'}</td><td>{v.latest||'—'}</td><td>{v.rows||'—'}</td></tr>)}</tbody></table>}
         </Card>
         <Card title="Data Quality">
           {!quality?<Empty>Pas de rapport.</Empty>:<><div className="big">{quality.status}</div>{quality.status==='NOT_READY'&&<p className="muted mini">{quality.feature_store?.message||'Feature Store non prêt.'}</p>}{(quality.checks||[]).map(c=><div className="checkRow" key={c.name}><Pill ok={c.ok}>{c.ok?'PASS':'WARN'}</Pill><span>{c.name}</span></div>)}</>}
@@ -177,8 +174,8 @@ export default function Home(){
 
     {tab==='Research'&&<>
       <Card title="Factor Research">
-        <div className="row"><button className="btn" onClick={()=>direct('Factor Research',async()=>{const x=await request('/api/research/factors');setFactorSummary(x);return x})}>Load Factor Research</button><button className="btn2" onClick={()=>postJob('/api/jobs/factor-summary','Factor Research',{})}>Queue</button></div>
-        {!factorSummary?.factors?.length?<Empty>Charge le rapport pour comparer les facteurs.</Empty>:<table><thead><tr><th>Factor</th><th>Mean IC</th><th>IC IR</th><th>Positive IC</th><th>Top-Bottom 20D</th></tr></thead><tbody>{factorSummary.factors.map(f=><tr key={f.feature}><td>{f.feature}</td><td>{num(f.mean_rank_ic,4)}</td><td>{num(f.ic_ir,3)}</td><td>{pct(f.positive_ic_ratio)}</td><td>{pct(f.top_bottom_future_20d)}</td></tr>)}</tbody></table>}
+        <div className="row"><button className="btn2" onClick={()=>postJob('/api/jobs/factor-summary','Factor Research',{})}>Recalculer</button></div>
+        {!factorSummary?.factors?.length?<Empty>Autopilot calculera le rapport automatiquement.</Empty>:<table><thead><tr><th>Factor</th><th>Mean IC</th><th>IC IR</th><th>Positive IC</th><th>Top-Bottom 20D</th></tr></thead><tbody>{factorSummary.factors.map(f=><tr key={f.feature}><td>{f.feature}</td><td>{num(f.mean_rank_ic,4)}</td><td>{num(f.ic_ir,3)}</td><td>{pct(f.positive_ic_ratio)}</td><td>{pct(f.top_bottom_future_20d)}</td></tr>)}</tbody></table>}
       </Card>
       <Card title="Research rule" className="section"><p>Le score complexe doit être comparé à une baseline momentum simple et évalué hors échantillon. Un Sharpe in-sample positif ne suffit pas.</p></Card>
     </>}
