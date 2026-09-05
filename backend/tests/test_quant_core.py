@@ -699,3 +699,27 @@ def test_v7_market_risk_floor_is_explicitly_stressable():
     assert float(low.min())>=.35-1e-12
     assert float(high.min())>=.65-1e-12
     assert float(high.iloc[-1])>=float(low.iloc[-1])
+
+
+def test_research_cache_round_trip(monkeypatch,tmp_path):
+    from app.services import research_cache
+
+    monkeypatch.setattr(research_cache,"ROOT",tmp_path)
+    key=research_cache.make_key(
+        "meta_v6_oos","dataset-123","version-1",{"a":1},{"features":["x","y"]}
+    )
+    frame=pd.DataFrame({
+        "date":pd.to_datetime(["2026-01-02","2026-01-05"]),
+        "symbol":["A","B"],
+        "score":[0.1,0.2],
+    })
+    research={"simulation":{"coverage_ratio":0.75},"oos_mean_rank_ic":0.03}
+    research_cache.save("meta_v6_oos",key,frame,research,"dataset-123")
+
+    loaded=research_cache.load("meta_v6_oos",key)
+    assert loaded is not None
+    cached_frame,cached_research,meta=loaded
+    assert list(cached_frame["symbol"])==["A","B"]
+    assert cached_research["simulation"]["coverage_ratio"]==0.75
+    assert meta["dataset_fingerprint"]=="dataset-123"
+    assert research_cache.load("meta_v6_oos","wrong-key") is None
