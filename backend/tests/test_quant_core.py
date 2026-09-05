@@ -723,3 +723,24 @@ def test_research_cache_round_trip(monkeypatch,tmp_path):
     assert cached_research["simulation"]["coverage_ratio"]==0.75
     assert meta["dataset_fingerprint"]=="dataset-123"
     assert research_cache.load("meta_v6_oos","wrong-key") is None
+
+
+def test_point_in_time_solid_gate_allows_bounded_negative_equity(monkeypatch):
+    from app.services import sec_fundamentals as sf
+
+    monkeypatch.setattr(sf.settings,"real_universe_min_sec_core_metrics",3)
+    monkeypatch.setattr(sf.settings,"real_universe_min_revenue",1_000_000_000.0)
+    monkeypatch.setattr(sf.settings,"real_universe_min_assets",5_000_000_000.0)
+
+    dates=pd.DatetimeIndex([pd.Timestamp("2026-03-01")])
+    events=pd.DataFrame([
+        {"symbol":"BUYBACK","metric":"revenue","value":8_000_000_000.0,"period_end":pd.Timestamp("2025-12-31"),"available_at":pd.Timestamp("2026-02-15")},
+        {"symbol":"BUYBACK","metric":"net_income","value":700_000_000.0,"period_end":pd.Timestamp("2025-12-31"),"available_at":pd.Timestamp("2026-02-15")},
+        {"symbol":"BUYBACK","metric":"assets","value":20_000_000_000.0,"period_end":pd.Timestamp("2025-12-31"),"available_at":pd.Timestamp("2026-02-15")},
+        {"symbol":"BUYBACK","metric":"equity","value":-3_000_000_000.0,"period_end":pd.Timestamp("2025-12-31"),"available_at":pd.Timestamp("2026-02-15")},
+        {"symbol":"BUYBACK","metric":"operating_cf","value":1_200_000_000.0,"period_end":pd.Timestamp("2025-12-31"),"available_at":pd.Timestamp("2026-02-15")},
+    ])
+    monkeypatch.setattr(sf,"fundamental_events",lambda symbol,force=False:events)
+    panel=sf.point_in_time_panel(["BUYBACK"],dates)
+    assert bool(panel.iloc[0]["solid_fundamental_eligible"])
+    assert pd.isna(panel.iloc[0]["roe"])
