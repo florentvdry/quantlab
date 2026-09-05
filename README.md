@@ -86,6 +86,35 @@ Le parcours normal ne demande plus de lancer une succession de boutons. L'Autopi
 
 Le polling UI ne synchronise plus Alpaca à chaque rafraîchissement : compte, positions, jobs, validations, facteurs et datasets sont lus depuis PostgreSQL / Redis / Feature Store local. Les appels broker réseau restent réservés aux synchronisations et opérations explicites.
 
+## Universe V2 — quality / liquid
+
+Le moteur Alpaca ne prend plus simplement les 60 plus gros volumes du jour. Le nouvel univers vise environ 180 actions US établies et liquides :
+
+- préfiltre des 600 actions les plus liquides ;
+- prix >= 10 USD ;
+- au moins 700 séances d'historique (~3 ans) ;
+- médiane dollar-volume 60j >= 25 M USD/jour ;
+- volatilité annualisée 60j <= 90 % ;
+- score combinant liquidité récente, liquidité courante, ancienneté et stabilité ;
+- ETF/ETN/funds/warrants/rights/units exclus ;
+- les ADR liquides restent autorisés ;
+- diagnostics persistés dans `universe_quality.json` et visibles dans System.
+
+L'objectif est un univers plus large pour l'alpha cross-sectionnel, mais composé de titres suffisamment établis pour éviter que les résultats dépendent de microcaps/IPO très récentes.
+
+## META V7.1 — balanced exposure
+
+V7.1 garde exactement l'alpha V6 et la sélection par corrélation V7. Il corrige uniquement la sous-utilisation du capital constatée dans V7 :
+
+- gross exposure cible calculée à chaque date avec seulement l'information disponible ;
+- floors par régime : TREND_UP 55 %, NEUTRAL 45 %, HIGH_VOL 30 %, RISK_OFF 25 % ;
+- confiance META + risque marché déterminent le chemin entre le floor et 95 % ;
+- les scales relatifs probabilité / inverse-vol sont conservés puis normalisés vers cette cible ;
+- cap 10 % par action toujours actif ;
+- stress tests floor -10 %, floor +10 %, coûts x2/x3.
+
+V7.1 est exploratoire et ne remplace ni V7 ni Paper sans validation future.
+
 ## META V6 — challenger expérimental
 
 V5 reste le benchmark de contrôle. V6 est un challenger research-only qui cherche surtout à améliorer Sharpe et drawdown sans modifier Paper :
