@@ -86,21 +86,23 @@ Le parcours normal ne demande plus de lancer une succession de boutons. L'Autopi
 
 Le polling UI ne synchronise plus Alpaca à chaque rafraîchissement : compte, positions, jobs, validations, facteurs et datasets sont lus depuis PostgreSQL / Redis / Feature Store local. Les appels broker réseau restent réservés aux synchronisations et opérations explicites.
 
-## Universe V2 — quality / liquid
+## Universe V3 — solid operating companies
 
-Le moteur Alpaca ne prend plus simplement les 60 plus gros volumes du jour. Le nouvel univers vise environ 180 actions US établies et liquides :
+Le moteur vise désormais ~120 sociétés US opérationnelles établies plutôt qu'un grand panier de titres simplement liquides :
 
-- préfiltre des 600 actions les plus liquides ;
+- préfiltre des 250 actions les plus liquides ;
 - prix >= 10 USD ;
-- au moins 700 séances d'historique (~3 ans) ;
-- médiane dollar-volume 60j >= 25 M USD/jour ;
-- volatilité annualisée 60j <= 90 % ;
-- score combinant liquidité récente, liquidité courante, ancienneté et stabilité ;
-- ETF/ETN/funds/warrants/rights/units exclus ;
-- les ADR liquides restent autorisés ;
+- au moins 1000 séances d'historique pour entrer dans l'univers courant ;
+- médiane dollar-volume 60j >= 50 M USD/jour ;
+- volatilité annualisée 60j <= 65 % ;
+- présence de fondamentaux SEC exploitables ;
+- actifs et capitaux propres positifs ;
+- résultat net positif ou cash-flow opérationnel positif ;
+- ETF/ETN/funds/warrants/rights/units exclus, avec exclusions explicites des principaux sponsors de produits leveraged/inverse ;
+- score final combinant liquidité, ancienneté et stabilité ;
 - diagnostics persistés dans `universe_quality.json` et visibles dans System.
 
-L'objectif est un univers plus large pour l'alpha cross-sectionnel, mais composé de titres suffisamment établis pour éviter que les résultats dépendent de microcaps/IPO très récentes.
+Le Feature Store applique en plus un filtre point-in-time : une société n'est tradable historiquement que lorsqu'elle avait déjà au moins 700 séances d'historique, des fondamentaux alors publiés suffisamment complets, une liquidité suffisante et une volatilité compatible avec le filtre. Cela évite d'utiliser rétrospectivement la qualité actuelle d'une société pour autoriser un trade ancien.
 
 ## META V7.1 — balanced exposure
 
