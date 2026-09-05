@@ -21,12 +21,14 @@ jobs:
         working-directory: backend
         env:
           PYTHONPATH: .
+          QUANTLAB_DATA_DIR: /tmp/quantlab
         run: python -m compileall -q app tests
       - name: Quant regression tests
         working-directory: backend
         env:
           DATA_MODE: synthetic
           PYTHONPATH: .
+          QUANTLAB_DATA_DIR: /tmp/quantlab
         run: python -m pytest -q
 
   frontend:
