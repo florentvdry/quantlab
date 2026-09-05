@@ -122,7 +122,10 @@ def point_in_time_panel(symbols, dates, force=False):
     out=pd.concat(parts,ignore_index=True) if parts else pd.DataFrame()
     if out.empty:return out
     # Conservative PIT ratios using only values filed by that date.
-    out['roe']=out.get('net_income',np.nan)/out.get('equity',np.nan).replace(0,np.nan)
+    equity_for_roe=out.get('equity',pd.Series(index=out.index,dtype=float)).where(
+        out.get('equity',pd.Series(index=out.index,dtype=float)).gt(0)
+    )
+    out['roe']=out.get('net_income',np.nan)/equity_for_roe.replace(0,np.nan)
     out['roa']=out.get('net_income',np.nan)/out.get('assets',np.nan).replace(0,np.nan)
     out['gross_margin']=out.get('gross_profit',np.nan)/out.get('revenue',np.nan).replace(0,np.nan)
     out['operating_margin']=out.get('operating_income',np.nan)/out.get('revenue',np.nan).replace(0,np.nan)
@@ -144,7 +147,8 @@ def point_in_time_panel(symbols, dates, force=False):
     out['solid_fundamental_eligible']=(
         (out['sec_core_metrics']>=int(settings.real_universe_min_sec_core_metrics))
         &assets.gt(0)
-        &equity.gt(0)
+        &equity.notna()
+        &equity.gt(-0.50*assets)
         &(revenue.gt(0)|net_income.notna())
         &(
             revenue.ge(float(settings.real_universe_min_revenue))
