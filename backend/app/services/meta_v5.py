@@ -276,9 +276,14 @@ class MetaLayer:
 
 def _fit_meta_layer(validation: pd.DataFrame) -> MetaLayer:
     dates = np.array(sorted(validation["date"].unique()))
-    split = max(20, int(len(dates) * 0.70))
+    split = max(20, int(len(dates) * 0.65))
+    inner_embargo = int(V5_CONFIG["embargo_days"])
+    cal_start = min(len(dates), split + inner_embargo)
     fit_dates = dates[:split]
-    cal_dates = dates[split:]
+    cal_dates = dates[cal_start:]
+    if len(cal_dates) < 10:
+        cal_start = split
+        cal_dates = dates[cal_start:]
     fit = validation[validation["date"].isin(fit_dates)].copy()
     cal = validation[validation["date"].isin(cal_dates)].copy()
     if cal.empty:
@@ -330,6 +335,7 @@ def _fit_meta_layer(validation: pd.DataFrame) -> MetaLayer:
         diagnostics={
             "fit_dates": int(len(fit_dates)),
             "calibration_dates": int(len(cal_dates)),
+            "calibration_embargo_days": int(max(0, cal_start - split)),
             "calibrated": calibrator is not None,
             "selected_threshold": best_threshold,
             "threshold_search": threshold_rows,
@@ -446,7 +452,7 @@ def build_meta_v5_oos(
     oos = pd.concat(predictions, ignore_index=True)
     scored = source.merge(oos, on=["date", "symbol"], how="left", suffixes=("", "_oos"))
     daily = _daily_ic(scored, "v5_smooth_score")
-    accepted = scored["v5_trade_score"].notna()
+    accepted = oos["v5_trade_score"].notna()
     summary = {
         "name": "META Ensemble v5",
         "dataset": panel_metadata(source),
