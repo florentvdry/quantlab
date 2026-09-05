@@ -462,3 +462,60 @@ def test_backtest_account_curve_tracks_daily_equity_and_realized_balance():
     assert any(int(row["trade_count"])>0 for row in curve)
     assert curve[-1]["equity_usd"]==curve[-1]["balance_usd"]
     assert curve[-1]["equity_usd"]==result["metrics"]["ending_capital_usd"]
+
+
+def test_daily_metrics_use_calendar_time_and_cash_days():
+    from app.services.backtest import run_backtest
+
+    dates=pd.bdate_range("2022-01-03",periods=520)
+    rows=[]
+    for si,symbol in enumerate(["A","B","C","D"]):
+        price=100.0+si
+        for i,d in enumerate(dates):
+            price*=1+(0.0007 if symbol=="A" else 0.0002)
+            score=np.nan if 100<=i<160 else 1.0-si*.1
+            rows.append({
+                "date":d,"symbol":symbol,"sector":"Test",
+                "open":price,"close":price,
+                "score":score,"future_relative_20d":0.0,
+            })
+    panel=pd.DataFrame(rows)
+    result=run_backtest(
+        {
+            "long_count":2,"short_count":0,"rebalance_days":10,
+            "gross_exposure":1.0,"long_gross":1.0,
+            "initial_capital":100000,
+            "min_long_count":1,
+        },
+        score_column="score",
+        strategy_name="daily-metrics",
+        panel=panel,
+    )
+
+    metrics=result["metrics"]
+    curve=result["account_curve"]
+    assert metrics["metric_frequency"]=="DAILY_MARK_TO_MARKET"
+    assert metrics["metric_observations"]==len(curve)
+    assert metrics["elapsed_years"]>1.8
+    # The skipped-signal zone must remain present as zero-return cash days.
+    zero_cash=[
+        row for row in curve
+        if row["gross_exposure"]==0 and row["cash_pct"]==1.0 and abs(row["daily_return"])<1e-12
+    ]
+    assert len(zero_cash)>20
+
+
+def test_daily_max_drawdown_catches_intraperiod_loss():
+    from app.services.backtest import _metrics
+
+    daily=[
+        {"date":"2026-01-02","equity_usd":100000.0,"daily_return":0.0},
+        {"date":"2026-01-05","equity_usd":90000.0,"daily_return":-0.10},
+        {"date":"2026-01-06","equity_usd":100000.0,"daily_return":1/9},
+    ]
+    rebalance=[
+        {"date":"2026-01-06","equity":1.0,"return":0.0},
+        {"date":"2026-01-07","equity":1.0,"return":0.0},
+    ]
+    m=_metrics(rebalance,1.0,[0.0,0.0],25.2,daily_curve=daily,initial_capital=100000.0)
+    assert m["max_drawdown"]==-0.10
