@@ -6,7 +6,7 @@ const API=process.env.NEXT_PUBLIC_API_URL||'http://localhost:8000'
 const pct=v=>v==null?'—':(Number(v)*100).toFixed(1)+'%'
 const num=(v,d=3)=>v==null?'—':Number(v).toFixed(d)
 const JOB_LABELS={
-  BACKTEST:'META V2 Backtest',ADAPTIVE_BACKTEST:'Adaptive META V3',BASELINE:'Baseline momentum',SWEEP:'Parameter sweep',ROBUSTNESS:'Robustness',
+  BACKTEST:'META V2 Backtest',V4_BACKTEST:'META V4 Low-Turnover',ADAPTIVE_BACKTEST:'Adaptive META V3',BASELINE:'Baseline momentum',SWEEP:'Parameter sweep',ROBUSTNESS:'Robustness',
   TRAIN_RIDGE:'Walk-forward Ridge',TRAIN_HGB:'Walk-forward HGB',FACTOR_SUMMARY:'Factor Research',
   VALIDATION:'Validation Gate',RIDGE_BACKTEST:'Ridge OOS Backtest',HGB_BACKTEST:'HGB OOS Backtest',DATA_REFRESH:'Market data',SEC_REFRESH:'SEC',DAILY_PIPELINE:'Daily Pipeline',
   PAPER_SNAPSHOT:'Paper Snapshot'
@@ -140,7 +140,7 @@ export default function Home(){
         <Card title="Actions">
           <div className="actionGrid">
             <button className="btn" disabled={busy||activeJobs.some(j=>j.kind==='DAILY_PIPELINE')} onClick={()=>postJob('/api/jobs/daily-pipeline?force_market=true','Daily Pipeline',{})}>{activeJobs.some(j=>j.kind==='DAILY_PIPELINE')?'Pipeline en cours…':'Run Daily Pipeline'}</button>
-            <button className="btn2" onClick={()=>postJob('/api/jobs/adaptive-backtest','Adaptive META V3')}>Adaptive META V3</button>
+            <button className="btn" onClick={()=>postJob('/api/jobs/v4-backtest','META V4 Low-Turnover',{})}>META V4 Low-Turnover</button><button className="btn2" onClick={()=>postJob('/api/jobs/adaptive-backtest','Adaptive META V3')}>Adaptive V3</button>
             <button className="btn2" onClick={()=>postJob('/api/jobs/validation','Validation Gate')}>Run Validation</button>
             <button className="btn2" onClick={()=>setTab('Research')}>Open Research</button>
           </div>
@@ -184,7 +184,7 @@ export default function Home(){
     {tab==='Backtests'&&<>
       <Card title="Strategy Builder">
         <div className="formGrid">{Object.entries(cfg).map(([k,v])=><label key={k}><span>{k}</span><input type="number" step="any" value={v} onChange={e=>setCfg({...cfg,[k]:Number(e.target.value)})}/></label>)}</div>
-        <div className="row topGap"><button className="btn" onClick={()=>postJob('/api/jobs/adaptive-backtest','Adaptive META V3')}>Queue Adaptive V3</button><button className="btn2" onClick={()=>postJob('/api/jobs/backtest','META V2')}>Queue META V2</button><button className="btn2" onClick={()=>postJob('/api/jobs/baseline','Momentum baseline')}>Queue Baseline</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/ridge','Ridge OOS Backtest')}>Ridge OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/hgb','HGB OOS Backtest')}>HGB OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/robustness','Robustness')}>Robustness V2</button><button className="btn2" onClick={()=>postJob('/api/jobs/sweep','Parameter Sweep',{base:cfg,grid:{long_count:[10,20,30],short_count:[10,20,30],rebalance_days:[5,10,21]}})}>Parameter Sweep</button></div>
+        <div className="row topGap"><button className="btn" onClick={()=>postJob('/api/jobs/v4-backtest','META V4 Low-Turnover',{})}>Queue META V4</button><button className="btn2" onClick={()=>postJob('/api/jobs/adaptive-backtest','Adaptive META V3')}>Adaptive V3</button><button className="btn2" onClick={()=>postJob('/api/jobs/backtest','META V2')}>Queue META V2</button><button className="btn2" onClick={()=>postJob('/api/jobs/baseline','Momentum baseline')}>Queue Baseline</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/ridge','Ridge OOS Backtest')}>Ridge OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/hgb','HGB OOS Backtest')}>HGB OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/robustness','Robustness')}>Robustness V2</button><button className="btn2" onClick={()=>postJob('/api/jobs/sweep','Parameter Sweep',{base:cfg,grid:{long_count:[10,20,30],short_count:[10,20,30],rebalance_days:[5,10,21]}})}>Parameter Sweep</button></div>
       </Card>
       {selectedBacktest&&<Card title={selectedBacktest.strategy} className="section">
         <div className="metricRow">
@@ -193,7 +193,7 @@ export default function Home(){
           <span>Max DD <b>{pct(selectedBacktest.metrics?.max_drawdown)}</b></span>
           <span>IC <b>{num(selectedBacktest.metrics?.mean_rank_ic_20d,4)}</b></span>
           <span>Win rate <b>{pct(selectedBacktest.metrics?.win_rate)}</b></span>
-          <span>Profit factor <b>{num(selectedBacktest.metrics?.profit_factor,2)}</b></span>
+          <span>Profit factor <b>{num(selectedBacktest.metrics?.profit_factor,2)}</b></span><span>Avg turnover <b>{pct(selectedBacktest.metrics?.avg_turnover_per_rebalance)}</b></span>
         </div>
         <div className="metricRow topGap">
           <span>Capital départ <b>{'$'+Number(selectedBacktest.metrics?.initial_capital_usd||0).toLocaleString()}</b></span>
@@ -203,7 +203,8 @@ export default function Home(){
           <span>Long P&L <b>{'$'+Number(selectedBacktest.metrics?.long_pnl_usd||0).toLocaleString()}</b></span>
           <span>Short P&L <b>{'$'+Number(selectedBacktest.metrics?.short_pnl_usd||0).toLocaleString()}</b></span>
         </div>
-        <div className="datasetBadge">{selectedBacktest.dataset?.mode||'legacy'} · {selectedBacktest.dataset?.from||'?'} → {selectedBacktest.dataset?.to||'?'} · {selectedBacktest.dataset?.fingerprint||'no fingerprint'}</div>
+        <div className="datasetBadge">{selectedBacktest.dataset?.mode||'legacy'} · {(selectedBacktest.dataset?.backtest_from||selectedBacktest.dataset?.from||'?')} → {(selectedBacktest.dataset?.backtest_to||selectedBacktest.dataset?.to||'?')} · {selectedBacktest.dataset?.fingerprint||'no fingerprint'}</div>
+        {selectedBacktest.metrics?.benchmark_cagr!=null&&<div className="metricRow topGap"><span>Benchmark EW CAGR <b>{pct(selectedBacktest.metrics.benchmark_cagr)}</b></span><span>Benchmark Sharpe <b>{selectedBacktest.metrics.benchmark_sharpe}</b></span><span>Benchmark DD <b>{pct(selectedBacktest.metrics.benchmark_max_drawdown)}</b></span><span>Excess CAGR <b className={(selectedBacktest.metrics.excess_cagr_vs_equal_weight||0)>=0?'positive':'negative'}>{pct(selectedBacktest.metrics.excess_cagr_vs_equal_weight)}</b></span></div>}
         <p className="muted mini">{selectedBacktest.audit_note||'Signal au close T, exécution au prochain open.'}</p>
         <div className="chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={selectedBacktest.equity_curve||[]}><XAxis dataKey="date" minTickGap={45}/><YAxis domain={['auto','auto']}/><Tooltip/><Line dataKey="equity" dot={false}/></LineChart></ResponsiveContainer></div>
         <h4>Ordres simulés ({selectedBacktest.order_ledger?.length||0})</h4>
@@ -213,7 +214,7 @@ export default function Home(){
         <h4>Rebalances ({selectedBacktest.rebalance_ledger?.length||0})</h4>
         {selectedBacktest.rebalance_ledger?.length>0&&<div className="tableScroll"><table><thead><tr><th>#</th><th>Signal</th><th>Entrée</th><th>Sortie</th><th>Turnover</th><th>Equity avant</th><th>P&L brut</th><th>Coûts</th><th>P&L net</th><th>Equity après</th></tr></thead><tbody>{selectedBacktest.rebalance_ledger.slice(-100).reverse().map(r=><tr key={r.rebalance_id}><td>#{r.rebalance_id}</td><td>{r.signal_date}</td><td>{r.entry_date}</td><td>{r.exit_date}</td><td>{pct(r.turnover)}</td><td>{'$'+Number(r.equity_before_usd||0).toLocaleString()}</td><td>{'$'+num(r.gross_pnl_usd,2)}</td><td>{'$'+num(r.cost_usd,2)}</td><td className={(r.net_pnl_usd||0)>=0?'positive':'negative'}>{'$'+num(r.net_pnl_usd,2)}</td><td>{'$'+Number(r.equity_after_usd||0).toLocaleString()}</td></tr>)}</tbody></table></div>}
       </Card>}
-      <Card title="Backtest Registry" className="section">{!backtests.length?<Empty>Aucun backtest.</Empty>:<table><thead><tr><th>#</th><th>Strategy</th><th>Data</th><th>Period</th><th>CAGR</th><th>Sharpe</th><th>Max DD</th></tr></thead><tbody>{backtests.map(b=><tr key={b.id} className="clickable" onClick={()=>openBacktest(b.id)}><td>#{b.id}</td><td>{b.strategy}</td><td>{b.dataset?.mode||'legacy'}</td><td>{b.dataset?.from&&b.dataset?.to?(b.dataset.from+' → '+b.dataset.to):'—'}</td><td>{pct(b.cagr)}</td><td>{b.sharpe}</td><td>{pct(b.max_drawdown)}</td></tr>)}</tbody></table>}</Card>
+      <Card title="Backtest Registry" className="section">{!backtests.length?<Empty>Aucun backtest.</Empty>:<table><thead><tr><th>#</th><th>Strategy</th><th>Data</th><th>Period</th><th>CAGR</th><th>Sharpe</th><th>Max DD</th></tr></thead><tbody>{backtests.map(b=><tr key={b.id} className="clickable" onClick={()=>openBacktest(b.id)}><td>#{b.id}</td><td>{b.strategy}</td><td>{b.dataset?.mode||'legacy'}</td><td>{(b.dataset?.backtest_from||b.dataset?.from)&&(b.dataset?.backtest_to||b.dataset?.to)?((b.dataset?.backtest_from||b.dataset?.from)+' → '+(b.dataset?.backtest_to||b.dataset?.to)):'—'}</td><td>{pct(b.cagr)}</td><td>{b.sharpe}</td><td>{pct(b.max_drawdown)}</td></tr>)}</tbody></table>}</Card>
     </>}
 
     {tab==='Validation'&&<>
