@@ -31,6 +31,7 @@ async def runtime_error_handler(_:Request,exc:RuntimeError):
 class BacktestRequest(BaseModel):
     long_count:int=Field(20,ge=1,le=50);short_count:int=Field(20,ge=1,le=50);rebalance_days:int=Field(5,ge=1,le=21)
     commission_bps:float=Field(6,ge=0,le=100);slippage_bps:float=Field(5,ge=0,le=100);gross_exposure:float=Field(2,ge=.2,le=2)
+    initial_capital:float=Field(100000,ge=100,le=100000000);adaptive_lookback_days:int=Field(252,ge=126,le=756)
 class StrategyCreate(BaseModel):
     name:str="META US";config:dict={}
 class ExperimentRequest(BaseModel):
@@ -184,6 +185,8 @@ def promote(strategy_id:int,db:Session=Depends(get_db)):
 
 @app.post("/api/jobs/backtest")
 def job_backtest(req:BacktestRequest):return enqueue("BACKTEST",req.model_dump())
+@app.post("/api/jobs/adaptive-backtest")
+def job_adaptive_backtest(req:BacktestRequest):return enqueue("ADAPTIVE_BACKTEST",req.model_dump())
 @app.post("/api/jobs/baseline")
 def job_baseline(req:BacktestRequest):return enqueue("BASELINE",req.model_dump())
 @app.post("/api/jobs/sweep")
