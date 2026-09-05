@@ -521,32 +521,48 @@ def test_daily_max_drawdown_catches_intraperiod_loss():
     assert m["max_drawdown"]==-0.10
 
 
-def test_quality_universe_filters_recent_and_illiquid_names(monkeypatch,tmp_path):
+def test_quality_universe_filters_recent_illiquid_and_non_operating_names(monkeypatch,tmp_path):
     from app.services import real_data
 
     monkeypatch.setattr(real_data,"DATA_DIR",str(tmp_path))
     monkeypatch.setattr(real_data.settings,"real_universe_size",2)
     monkeypatch.setattr(real_data.settings,"real_universe_prefilter_size",4)
     monkeypatch.setattr(real_data.settings,"real_universe_min_price",10.0)
-    monkeypatch.setattr(real_data.settings,"real_universe_min_history_sessions",700)
-    monkeypatch.setattr(real_data.settings,"real_universe_min_median_dollar_volume",25_000_000.0)
-    monkeypatch.setattr(real_data.settings,"real_universe_max_volatility",0.90)
+    monkeypatch.setattr(real_data.settings,"real_universe_min_history_sessions",1000)
+    monkeypatch.setattr(real_data.settings,"real_universe_min_median_dollar_volume",50_000_000.0)
+    monkeypatch.setattr(real_data.settings,"real_universe_max_volatility",0.65)
+    monkeypatch.setattr(real_data.settings,"real_universe_min_sec_core_metrics",3)
 
     monkeypatch.setattr(real_data,"_snapshot_rank",lambda candidates:[
         ("AAPL",2_000_000_000.0,200.0,10_000_000.0),
         ("MSFT",1_800_000_000.0,450.0,4_000_000.0),
         ("NEWCO",1_700_000_000.0,50.0,34_000_000.0),
-        ("TINY",1_600_000_000.0,40.0,40_000_000.0),
+        ("TQQQ",1_600_000_000.0,80.0,20_000_000.0),
     ])
     monkeypatch.setattr(real_data,"_quality_history",lambda symbols:pd.DataFrame([
-        {"symbol":"AAPL","history_sessions":1000,"last_price":200.0,"median_dollar_volume_60":1_500_000_000.0,"volatility_60":0.25},
-        {"symbol":"MSFT","history_sessions":1000,"last_price":450.0,"median_dollar_volume_60":1_200_000_000.0,"volatility_60":0.22},
+        {"symbol":"AAPL","history_sessions":1200,"last_price":200.0,"median_dollar_volume_60":1_500_000_000.0,"volatility_60":0.25},
+        {"symbol":"MSFT","history_sessions":1200,"last_price":450.0,"median_dollar_volume_60":1_200_000_000.0,"volatility_60":0.22},
         {"symbol":"NEWCO","history_sessions":180,"last_price":50.0,"median_dollar_volume_60":900_000_000.0,"volatility_60":0.55},
-        {"symbol":"TINY","history_sessions":900,"last_price":40.0,"median_dollar_volume_60":4_000_000.0,"volatility_60":0.35},
+        {"symbol":"TQQQ","history_sessions":1200,"last_price":80.0,"median_dollar_volume_60":1_600_000_000.0,"volatility_60":0.60},
+    ]))
+    monkeypatch.setattr(real_data,"_sec_operating_quality",lambda symbols:pd.DataFrame([
+        {"symbol":"AAPL","sec_core_metrics":5,"sec_balance_ok":True,"sec_activity_ok":True,"sec_earning_power":True,"sec_operating_company":True},
+        {"symbol":"MSFT","sec_core_metrics":5,"sec_balance_ok":True,"sec_activity_ok":True,"sec_earning_power":True,"sec_operating_company":True},
+        {"symbol":"TQQQ","sec_core_metrics":0,"sec_balance_ok":False,"sec_activity_ok":False,"sec_earning_power":False,"sec_operating_company":False},
     ]))
 
-    selected=real_data._quality_rank_universe(["AAPL","MSFT","NEWCO","TINY"])
+    selected=real_data._quality_rank_universe(["AAPL","MSFT","NEWCO","TQQQ"])
     assert selected==["AAPL","MSFT"]
+
+
+def test_asset_candidates_exclude_leveraged_etf_sponsors(monkeypatch):
+    from app.services import real_data
+
+    monkeypatch.setattr(real_data,"get_assets",lambda:[
+        {"symbol":"TQQQ","name":"ProShares UltraPro QQQ","exchange":"NASDAQ","tradable":True,"fractionable":True},
+        {"symbol":"AAPL","name":"Apple Inc. Common Stock","exchange":"NASDAQ","tradable":True,"fractionable":True},
+    ])
+    assert real_data._asset_candidates()==["AAPL"]
 
 
 def test_v71_balanced_exposure_uses_confidence_and_regime():
@@ -581,3 +597,24 @@ def test_v71_balanced_exposure_uses_confidence_and_regime():
     assert float(selected["v71_position_scale"].mean())>=0.25
     assert float(selected["v71_position_scale"].max())<=1.0
     assert summary["decision_dates"]==1
+
+
+def test_feature_solid_eligibility_is_point_in_time_and_maturity_gated(monkeypatch):
+    from app.services import features
+
+    monkeypatch.setattr(features.settings,"real_universe_min_price",10.0)
+    monkeypatch.setattr(features.settings,"real_trade_min_history_sessions",5)
+    monkeypatch.setattr(features.settings,"real_universe_min_median_dollar_volume",1.0)
+    monkeypatch.setattr(features.settings,"real_universe_max_volatility",2.0)
+
+    dates=pd.bdate_range("2026-01-02",periods=70)
+    df=pd.DataFrame({
+        "date":dates,
+        "symbol":["A"]*len(dates),
+        "close":np.linspace(100,110,len(dates)),
+        "volume":[1_000_000]*len(dates),
+        "solid_fundamental_eligible":[False]*35+[True]*35,
+    })
+    out=features._technical(df)
+    assert not bool(out.iloc[34]["solid_eligible"])
+    assert bool(out.iloc[-1]["solid_eligible"])
