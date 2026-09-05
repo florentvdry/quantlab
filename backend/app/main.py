@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from redis import Redis
 
 from app.db.session import Base,engine,get_db
-from app.models.entities import BacktestRun,PaperPosition,ExecutionLog,RebalanceRun,BrokerOrder,StrategyVersion,ModelVersion,ExperimentRun,JobRun,TradeFill
+from app.models.entities import BacktestRun,PaperPosition,ExecutionLog,RebalanceRun,BrokerOrder,StrategyVersion,ModelVersion,ExperimentRun,JobRun,TradeFill,SystemState
 from app.core.config import settings
 from app.services.backtest import run_backtest
 from app.services.broker import PaperBrokerService
