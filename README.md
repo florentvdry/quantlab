@@ -1,8 +1,8 @@
-# QuantLab V1.2
+# QuantLab V1.3
 
 Plateforme locale de recherche quantitative sur actions US : **Data → Feature Store → Factor Research → Backtest → Walk-forward → Robustness → Validation → Alpaca Paper**.
 
-> **Aucun chemin Live Trading n'est implémenté.** La V1.2 s'arrête volontairement à Alpaca PAPER.
+> **Aucun chemin Live Trading n'est implémenté.** La V1.3 s'arrête volontairement à Alpaca PAPER.
 
 ## Démarrage Windows / PowerShell
 
@@ -69,6 +69,23 @@ docker compose up --build --force-recreate
 
 Les credentials doivent être ceux d'**Alpaca Paper**. Ne publie jamais tes clés dans Git ou dans un ticket.
 
+## Interface V1.3
+
+Le frontend a été refait avec Tailwind CSS autour d'un seul snapshot local `GET /api/app/snapshot`.
+
+Navigation principale :
+
+- Dashboard
+- Research
+- Backtests
+- Signals
+- Paper
+- System
+
+Le parcours normal ne demande plus de lancer une succession de boutons. L'Autopilot maintient les données et les résultats ; les actions manuelles restent secondaires.
+
+Le polling UI ne synchronise plus Alpaca à chaque rafraîchissement : compte, positions, jobs, validations, facteurs et datasets sont lus depuis PostgreSQL / Redis / Feature Store local. Les appels broker réseau restent réservés aux synchronisations et opérations explicites.
+
 ## Autopilot / workflow recommandé
 
 Avec `AUTO_BOOTSTRAP_ENABLED=true` (défaut), aucun bouton n'est requis pour initialiser QuantLab. Au démarrage, le scheduler lance automatiquement si nécessaire :
@@ -80,6 +97,20 @@ Le refresh quotidien utilise le même pipeline complet. Les boutons restent disp
 1. **Overview** — suivre l'Autopilot et la progression du job.
 2. **Research / Models / Backtests / Validation / Signals** — consulter les résultats chargés automatiquement.
 3. **Paper** — seulement après validation/promotion ; commencer par Preview / Risk Gate.
+
+## Stabilisation backend V1.3
+
+- snapshot agrégé local pour réduire fortement le nombre de requêtes frontend ;
+- timeout frontend avec `AbortController` ;
+- cache data portable via `QUANTLAB_DATA_DIR` ;
+- ingestion Alpaca avec retries, contrôle des tokens de pagination et écritures atomiques ;
+- news Alpaca best-effort : une panne news ne bloque plus le Feature Store ;
+- SEC best-effort avec cache stale fallback et 404 non fatal ;
+- heartbeat worker indépendant des jobs longs ;
+- déduplication des jobs lourds (`AUTO_BOOTSTRAP`, `META_V5`, validation, refresh data/SEC) ;
+- le promotion gate reconnaît désormais les validations produites par l'Autopilot ;
+- les lectures UI n'appellent plus `sync_account()` ;
+- historique Paper borné pour éviter un polling DB qui grossit sans limite.
 
 ## Anti-lookahead
 
@@ -244,6 +275,7 @@ Cela doit notamment empêcher qu'une erreur JSX comme une accolade manquante soi
 ## Endpoints utiles
 
 - `GET /health`
+- `GET /api/app/snapshot`
 - `GET /ready`
 - `GET /api/setup`
 - `POST /api/jobs/bootstrap`
@@ -267,7 +299,7 @@ Cela doit notamment empêcher qu'une erreur JSX comme une accolade manquante soi
 - `POST /api/paper/kill/cancel-orders`
 - `POST /api/paper/kill/flatten?confirm=FLATTEN_PAPER`
 
-## Limites V1.2
+## Limites V1.3
 
 - Univers réel volontairement encore limité / curated avant montée en charge.
 - Feed Alpaca configurable ; IEX n'est pas l'intégralité du marché US.
