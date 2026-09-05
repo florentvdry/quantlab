@@ -678,3 +678,24 @@ def test_point_in_time_solid_gate_uses_size_not_profit(monkeypatch):
     monkeypatch.setattr(sf,"fundamental_events",lambda symbol,force=False:events)
     panel=sf.point_in_time_panel(["BIGCO"],dates)
     assert bool(panel.iloc[0]["solid_fundamental_eligible"])
+
+
+def test_v7_market_risk_floor_is_explicitly_stressable():
+    from app.services import meta_v7
+
+    dates=pd.bdate_range("2025-01-02",periods=140)
+    rows=[]
+    for si,symbol in enumerate(["A","B","C","D","E"]):
+        price=100.0+si
+        for i,d in enumerate(dates):
+            # Calm history followed by a volatile tail so the lower clip matters.
+            shock=(0.001*((i%5)-2)) if i<110 else (0.025*((i%3)-1))
+            price*=1+shock
+            rows.append({"date":d,"symbol":symbol,"close":price})
+    frame=pd.DataFrame(rows)
+
+    low=meta_v7._market_risk_scale(frame,floor=.35)
+    high=meta_v7._market_risk_scale(frame,floor=.65)
+    assert float(low.min())>=.35-1e-12
+    assert float(high.min())>=.65-1e-12
+    assert float(high.iloc[-1])>=float(low.iloc[-1])
