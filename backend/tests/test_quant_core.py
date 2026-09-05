@@ -794,3 +794,17 @@ def test_snapshot_job_exposes_backtest_id_while_stresses_continue():
     assert summary["backtest_id"]==42
     assert summary["model_version_id"]==9
     assert summary["progress"]==84
+
+
+def test_v7_probability_floor_increases_marginal_signal_size_without_changing_acceptance():
+    from app.services.meta_v7 import _size_from_probability_with_floor
+
+    prob=np.array([0.49,0.50,0.52,0.70])
+    low=_size_from_probability_with_floor(prob,0.50,0.10)
+    mid=_size_from_probability_with_floor(prob,0.50,0.30)
+
+    assert low[0]==0.0 and mid[0]==0.0
+    assert low[1]>=0.10 and mid[1]>=0.30
+    assert mid[2]>low[2]
+    assert mid[3]>low[3]
+    assert np.all(mid<=1.0)
