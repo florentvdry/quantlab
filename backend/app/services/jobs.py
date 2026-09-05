@@ -99,6 +99,18 @@ def _persist_backtest(db,result):
     db.add(row); db.commit(); db.refresh(row)
     return row.id
 
+def _update_persisted_backtest(db,backtest_id,result):
+    row=db.get(BacktestRun,backtest_id)
+    if not row:
+        raise RuntimeError(f"Backtest {backtest_id} disappeared before enrichment")
+    m=result["metrics"]
+    row.strategy_name=result["strategy"]
+    row.cagr=m["cagr"];row.sharpe=m["sharpe"];row.max_drawdown=m["max_drawdown"]
+    row.volatility=m["volatility"];row.turnover=m["avg_turnover_per_rebalance"]
+    row.payload_json=safe_dumps(result,default=str)
+    db.commit()
+    return row.id
+
 def execute_job(key:str):
     db=SessionLocal(); row=db.query(JobRun).filter(JobRun.job_key==key).first()
     if not row: db.close(); return
@@ -179,15 +191,54 @@ def execute_job(key:str):
             result["model_version_id"]=_persist_meta_v6_model(db,result)
             update(db,row,progress=95,result_json=safe_dumps({"message":"META V6 — challenger persisté; compare au V5 dans Backtests"}))
         elif row.kind=="META_V7":
-            def progress_v7(value,message):
-                update(db,row,progress=value,result_json=safe_dumps({"message":message}))
-            update(db,row,progress=10,result_json=safe_dumps({"message":"META V7 — diversification corrélation + volatility scaling"}))
-            bundle=meta_v7_validation_bundle(progress=progress_v7)
-            result=bundle["backtest"]
-            result["meta_v7_validation"]={"robustness":bundle["robustness"],"scenarios":bundle["scenarios"]}
-            result["backtest_id"]=_persist_backtest(db,result)
-            result["model_version_id"]=_persist_meta_v7_model(db,result)
-            update(db,row,progress=95,result_json=safe_dumps({"message":"META V7 — risk challenger persisté; compare au V6 dans Backtests"}))
+            def progress_v7_base(value,message):
+                mapped=max(10,min(82,int(value)))
+                update(db,row,progress=mapped,result_json=safe_dumps({"message":message}))
+            update(db,row,progress=10,result_json=safe_dumps({"message":"META V7 — calcul du backtest base"}))
+
+            # Persist the base result as soon as it exists. Stress scenarios can take
+            # noticeably longer and must not keep the Backtests registry empty.
+            result=run_meta_v7(progress=progress_v7_base)
+            backtest_id=_persist_backtest(db,result)
+            model_version_id=_persist_meta_v7_model(db,result)
+            result["backtest_id"]=backtest_id
+            result["model_version_id"]=model_version_id
+            update(
+                db,row,progress=84,
+                result_json=safe_dumps({
+                    "message":"META V7 base persisté — stress tests en cours",
+                    "backtest_id":backtest_id,
+                    "model_version_id":model_version_id,
+                })
+            )
+
+            def progress_v7_stress(value,message):
+                mapped=85+int(min(100,max(0,float(value)))*0.10)
+                update(
+                    db,row,progress=min(95,mapped),
+                    result_json=safe_dumps({
+                        "message":message,
+                        "backtest_id":backtest_id,
+                        "model_version_id":model_version_id,
+                    })
+                )
+
+            # V6 OOS is fingerprint-cached by run_meta_v7 above, so this phase reuses
+            # the same predictions and only computes the portfolio/risk stresses.
+            bundle=meta_v7_validation_bundle(progress=progress_v7_stress)
+            result["meta_v7_validation"]={
+                "robustness":bundle["robustness"],
+                "scenarios":bundle["scenarios"],
+            }
+            _update_persisted_backtest(db,backtest_id,result)
+            update(
+                db,row,progress=97,
+                result_json=safe_dumps({
+                    "message":"META V7 — base + stress tests persistés",
+                    "backtest_id":backtest_id,
+                    "model_version_id":model_version_id,
+                })
+            )
         elif row.kind=="META_V71":
             def progress_v71(value,message):
                 update(db,row,progress=value,result_json=safe_dumps({"message":message}))
