@@ -154,7 +154,8 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
             except Exception:pass
         else:
             active_score=score_column
-        snap=snap.sort_values(active_score,ascending=False)
+        snap=snap.dropna(subset=[active_score]).sort_values(active_score,ascending=False)
+        if len(snap)<int(p["long_count"])+int(p["short_count"]):continue
         longs=snap.head(int(p["long_count"]));shorts=snap.tail(int(p["short_count"]))
         if longs.empty or shorts.empty: continue
         leg=float(p["gross_exposure"])/2
@@ -264,7 +265,9 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
         metrics["mean_rank_ic_20d"]=round(float(np.mean(adaptive_eval_ic)),4)
     else:
         metrics["mean_rank_ic_20d"]=None if not np.isfinite(ic) else round(float(ic),4)
-    rank_sample=df[df.date==df.date.max()].sort_values(score_column,ascending=False)
+    rank_source=df.dropna(subset=[score_column]) if score_column in df.columns else df
+    rank_date=rank_source.date.max()
+    rank_sample=rank_source[rank_source.date==rank_date].sort_values(score_column,ascending=False)
     return {
         "strategy":strategy_name,"score_column":"adaptive_train_only" if adaptive else score_column,
         "params":p,"dataset":panel_metadata(df),
