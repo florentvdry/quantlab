@@ -151,7 +151,7 @@ def _split_order(symbol,prev_qty,target_qty,price,date,rebalance_id,cost_rate):
         add("SELL" if prev_qty>0 else "SHORT",prev_qty-target_qty)
     return orders
 
-def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="META US v2",panel=None,adaptive=False)->dict:
+def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="META US v2",panel=None,adaptive=False,position_scale_column=None)->dict:
     p=DEFAULTS|(params or {})
     df=(build_feature_panel() if panel is None else panel).copy().sort_values(["date","symbol"])
     all_dates=np.array(sorted(df.date.unique()))
@@ -190,7 +190,11 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
             active_score=score_column
         snap=snap.dropna(subset=[active_score]).sort_values(active_score,ascending=False)
         long_n=int(p["long_count"]);short_n=int(p["short_count"])
-        if len(snap)<long_n+short_n:continue
+        min_long=long_n if p.get("min_long_count") is None else int(p.get("min_long_count") or 0)
+        min_short=short_n if p.get("min_short_count") is None else int(p.get("min_short_count") or 0)
+        if len(snap)<min_long+min_short:continue
+        long_n=min(long_n,len(snap))
+        short_n=min(short_n,max(0,len(snap)-long_n))
         prev_long=[s for s,w in prev_weights.items() if w>0]
         prev_short=[s for s,w in prev_weights.items() if w<0]
         buffer=int(p.get("rank_buffer") or 0)
@@ -212,8 +216,25 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
             long_gross=float(p.get("long_gross") or 0.0)
             short_gross=float(p.get("short_gross") or 0.0)
         weights={}
-        if len(longs):weights.update({s:long_gross/len(longs) for s in longs.index})
-        if len(shorts):weights.update({s:-short_gross/len(shorts) for s in shorts.index})
+        if len(longs):
+            if position_scale_column and position_scale_column in longs.columns:
+                scales=longs[position_scale_column].clip(lower=0,upper=1).fillna(0.0)
+                if bool(p.get("normalize_position_scale",True)) and float(scales.sum())>1e-12:
+                    weights.update({s:long_gross*float(scales.loc[s]/scales.sum()) for s in longs.index})
+                else:
+                    weights.update({s:long_gross*float(scales.loc[s])/len(longs) for s in longs.index})
+            else:
+                weights.update({s:long_gross/len(longs) for s in longs.index})
+        if len(shorts):
+            if position_scale_column and position_scale_column in shorts.columns:
+                scales=shorts[position_scale_column].clip(lower=0,upper=1).fillna(0.0)
+                if bool(p.get("normalize_position_scale",True)) and float(scales.sum())>1e-12:
+                    weights.update({s:-short_gross*float(scales.loc[s]/scales.sum()) for s in shorts.index})
+                else:
+                    weights.update({s:-short_gross*float(scales.loc[s])/len(shorts) for s in shorts.index})
+            else:
+                weights.update({s:-short_gross/len(shorts) for s in shorts.index})
+        weights={s:w for s,w in weights.items() if abs(w)>1e-12}
 
         entry=by_date.get(entry_d);exit_=by_date.get(exit_d)
         if entry is None or exit_ is None: continue
@@ -366,6 +387,7 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
     return {
         "strategy":strategy_name,"score_column":"adaptive_train_only" if adaptive else score_column,
         "params":p,"dataset":dataset,
+        "position_scale_column":position_scale_column,
         "execution_timing":"signal_close_T__entry_open_T1",
         "audit_note":"Prices are next-open rebalance marks. Orders show simulated BUY/SELL/SHORT/COVER activity; position_ledger attributes P&L between consecutive rebalance opens.",
         "metrics":metrics,"equity_curve":curve,
