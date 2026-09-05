@@ -231,3 +231,27 @@ def test_feature_store_status_reports_missing_without_raising(monkeypatch,tmp_pa
     status=features.feature_store_status()
     assert status["ready"] is False
     assert status["reason"]=="missing"
+
+
+def test_json_safe_normalizes_non_finite_quant_values():
+    import json
+    from app.services.json_utils import StrictJSONResponse,json_safe,safe_dumps
+
+    payload={
+        "nan":np.nan,
+        "pos_inf":np.inf,
+        "neg_inf":-np.inf,
+        "nested":[1.0,{"metric":np.float64(np.nan),"ok":np.float64(.25)}],
+    }
+    safe=json_safe(payload)
+    assert safe["nan"] is None
+    assert safe["pos_inf"] is None
+    assert safe["neg_inf"] is None
+    assert safe["nested"][1]["metric"] is None
+    assert safe["nested"][1]["ok"]==.25
+    json.dumps(safe,allow_nan=False)
+    assert '"nan": null' in safe_dumps(payload)
+    rendered=StrictJSONResponse(payload).body.decode()
+    assert '"nan":null' in rendered
+    assert "NaN" not in rendered
+    assert "Infinity" not in rendered
