@@ -112,6 +112,16 @@ def _diversified_symbols(
     return selected[:max_names], max_corr_seen
 
 
+def _size_from_probability_with_floor(prob, threshold, floor: float) -> np.ndarray:
+    prob=np.asarray(prob,dtype=float)
+    floor=float(np.clip(floor,0.0,0.95))
+    accepted=prob>=float(threshold)
+    denom=max(0.90-float(threshold),0.10)
+    confidence=np.clip((prob-float(threshold))/denom,0.0,1.0)
+    scale=floor+(1.0-floor)*np.power(confidence,1.25)
+    return np.where(accepted,np.clip(scale,0.0,1.0),0.0)
+
+
 def _refresh_thresholds(research: dict) -> dict[int, float]:
     out = {}
     for row in research.get("refreshes", []):
@@ -129,6 +139,7 @@ def apply_v7_risk_overlay(
     corr_cap: float | None = None,
     max_names: int | None = None,
     market_risk_floor: float | None = None,
+    probability_scale_floor: float = 0.10,
 ) -> tuple[pd.DataFrame, dict]:
     out = scored.copy().sort_values(["date", "symbol"])
     all_dates = np.array(sorted(out["date"].unique()))
@@ -192,9 +203,10 @@ def apply_v7_risk_overlay(
             continue
 
         chosen = candidates[candidates["symbol"].isin(selected)].copy()
-        probability_scale = _size_from_probability(
+        probability_scale = _size_from_probability_with_floor(
             chosen["v6_meta_probability"].to_numpy(dtype=float),
             threshold,
+            probability_scale_floor,
         )
 
         median_vol = float(chosen["vol_20d"].replace([np.inf, -np.inf], np.nan).median())
@@ -237,6 +249,7 @@ def apply_v7_risk_overlay(
         "min_names": min_names,
         "market_vol_lookback_days": int(V7_CONFIG["market_vol_lookback_days"]),
         "market_risk_floor": risk_floor,
+        "probability_scale_floor": float(probability_scale_floor),
         "single_name_weight_cap": float(V7_CONFIG["single_name_weight_cap"]),
         "mean_selected_names": round(float(np.mean(selected_counts)), 3) if selected_counts else None,
         "mean_position_scale": round(float(np.mean(gross_scale_estimates)), 4) if gross_scale_estimates else None,
@@ -306,7 +319,11 @@ def run_meta_v7(
     return result
 
 
-def meta_v7_validation_bundle(panel: pd.DataFrame | None = None, progress=None) -> dict:
+def meta_v7_validation_bundle(
+    panel: pd.DataFrame | None = None,
+    progress=None,
+    scenario_callback: Callable[[list[dict]], None] | None = None,
+) -> dict:
     from app.services.backtest import run_backtest
 
     source = build_feature_panel() if panel is None else panel
@@ -316,20 +333,23 @@ def meta_v7_validation_bundle(panel: pd.DataFrame | None = None, progress=None) 
 
     base_floor=float(V7_CONFIG["market_risk_floor"])
     overlays = [
-        ("base", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"]), base_floor),
-        ("risk_floor_035", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"]), 0.35),
-        ("risk_floor_055", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"]), 0.55),
-        ("risk_floor_065", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"]), 0.65),
-        ("corr_075", 0.75, int(V7_CONFIG["max_names"]), base_floor),
-        ("corr_090", 0.90, int(V7_CONFIG["max_names"]), base_floor),
-        ("max_10", float(V7_CONFIG["corr_cap"]), 10, base_floor),
-        ("max_15", float(V7_CONFIG["corr_cap"]), 15, base_floor),
+        ("base", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"]), base_floor, 0.10),
+        ("prob_floor_020", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"]), base_floor, 0.20),
+        ("prob_floor_030", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"]), base_floor, 0.30),
+        ("prob_floor_040", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"]), base_floor, 0.40),
+        ("risk_floor_035", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"]), 0.35, 0.10),
+        ("risk_floor_055", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"]), 0.55, 0.10),
+        ("risk_floor_065", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"]), 0.65, 0.10),
+        ("corr_075", 0.75, int(V7_CONFIG["max_names"]), base_floor, 0.10),
+        ("corr_090", 0.90, int(V7_CONFIG["max_names"]), base_floor, 0.10),
+        ("max_10", float(V7_CONFIG["corr_cap"]), 10, base_floor, 0.10),
+        ("max_15", float(V7_CONFIG["corr_cap"]), 15, base_floor, 0.10),
     ]
 
     rows = []
     base_result = None
     base_research = None
-    for i, (name, cap, names, risk_floor) in enumerate(overlays):
+    for i, (name, cap, names, risk_floor, prob_floor) in enumerate(overlays):
         if progress:
             progress(76 + int(15 * i / len(overlays)), f"META V7 risk stress: {name}")
         scored, overlay = apply_v7_risk_overlay(
@@ -338,6 +358,7 @@ def meta_v7_validation_bundle(panel: pd.DataFrame | None = None, progress=None) 
             corr_cap=cap,
             max_names=names,
             market_risk_floor=risk_floor,
+            probability_scale_floor=prob_floor,
         )
         result = run_backtest(
             V7_PORTFOLIO | {"long_count": names},
@@ -347,6 +368,8 @@ def meta_v7_validation_bundle(panel: pd.DataFrame | None = None, progress=None) 
             position_scale_column="v7_position_scale",
         )
         rows.append({"scenario": name, **result["metrics"], "risk_overlay": overlay})
+        if scenario_callback:
+            scenario_callback(list(rows))
         if name == "base":
             base_result = result
             base_research = {
@@ -379,6 +402,8 @@ def meta_v7_validation_bundle(panel: pd.DataFrame | None = None, progress=None) 
             position_scale_column="v7_position_scale",
         )
         rows.append({"scenario": name, **result["metrics"]})
+        if scenario_callback:
+            scenario_callback(list(rows))
 
     sharpes = np.asarray([row["sharpe"] for row in rows], dtype=float)
     robustness = {
