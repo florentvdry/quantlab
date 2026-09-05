@@ -29,24 +29,54 @@ V4_FEATURE_WEIGHTS={
     "liquidity_rank":0.05,
 }
 
-def _metrics(curve,equity,turnovers,periods_per_year,positions=None):
-    returns=pd.Series([x["return"] for x in curve],dtype=float)
-    if len(returns)<2: raise ValueError("Not enough data")
-    years=len(returns)/periods_per_year
-    cagr=equity**(1/max(years,1e-9))-1
-    vol=returns.std(ddof=1)*math.sqrt(periods_per_year)
-    ann=returns.mean()*periods_per_year
-    downside=returns[returns<0].std(ddof=1)*math.sqrt(periods_per_year) if (returns<0).sum()>1 else np.nan
-    sharpe=ann/(vol+1e-12)
-    sortino=ann/(downside+1e-12) if np.isfinite(downside) else np.nan
-    eq=pd.Series([x["equity"] for x in curve],dtype=float)
-    dd=eq/eq.cummax()-1
-    max_dd=float(dd.min())
+def _metrics(curve,equity,turnovers,periods_per_year,positions=None,daily_curve=None,initial_capital=None):
+    # Strategy headline metrics should be based on the daily mark-to-market
+    # account curve, including cash days. Falling back to rebalance-period
+    # returns is retained for simple benchmark curves that do not yet have a
+    # daily account journal.
+    use_daily=bool(daily_curve and len(daily_curve)>=2)
+    if use_daily:
+        returns=pd.Series([float(x.get("daily_return",0.0)) for x in daily_curve],dtype=float)
+        eq_usd=pd.Series([float(x["equity_usd"]) for x in daily_curve],dtype=float)
+        first_date=pd.Timestamp(daily_curve[0]["date"])
+        last_date=pd.Timestamp(daily_curve[-1]["date"])
+        elapsed_years=max((last_date-first_date).days/365.25,1/365.25)
+        start_capital=float(initial_capital if initial_capital is not None else eq_usd.iloc[0]/max(1+returns.iloc[0],1e-12))
+        end_capital=float(eq_usd.iloc[-1])
+        total_equity=end_capital/max(start_capital,1e-12)
+        cagr=total_equity**(1/elapsed_years)-1
+        vol=returns.std(ddof=1)*math.sqrt(252)
+        ann=returns.mean()*252
+        downside=returns[returns<0].std(ddof=1)*math.sqrt(252) if (returns<0).sum()>1 else np.nan
+        sharpe=ann/(vol+1e-12)
+        sortino=ann/(downside+1e-12) if np.isfinite(downside) else np.nan
+        dd=eq_usd/eq_usd.cummax()-1
+        max_dd=float(dd.min())
+        metric_days=int(len(returns))
+        metric_frequency="DAILY_MARK_TO_MARKET"
+    else:
+        returns=pd.Series([x["return"] for x in curve],dtype=float)
+        if len(returns)<2: raise ValueError("Not enough data")
+        elapsed_years=len(returns)/periods_per_year
+        total_equity=float(equity)
+        cagr=total_equity**(1/max(elapsed_years,1e-9))-1
+        vol=returns.std(ddof=1)*math.sqrt(periods_per_year)
+        ann=returns.mean()*periods_per_year
+        downside=returns[returns<0].std(ddof=1)*math.sqrt(periods_per_year) if (returns<0).sum()>1 else np.nan
+        sharpe=ann/(vol+1e-12)
+        sortino=ann/(downside+1e-12) if np.isfinite(downside) else np.nan
+        eq=pd.Series([x["equity"] for x in curve],dtype=float)
+        dd=eq/eq.cummax()-1
+        max_dd=float(dd.min())
+        metric_days=int(len(returns))
+        metric_frequency="REBALANCE_PERIOD_FALLBACK"
     calmar=cagr/abs(max_dd) if max_dd<0 else np.nan
-    out={"total_return":round(equity-1,4),"cagr":round(float(cagr),4),"sharpe":round(float(sharpe),3),
+    out={"total_return":round(total_equity-1,4),"cagr":round(float(cagr),4),"sharpe":round(float(sharpe),3),
          "sortino":None if not np.isfinite(sortino) else round(float(sortino),3),
          "calmar":None if not np.isfinite(calmar) else round(float(calmar),3),
          "volatility":round(float(vol),4),"max_drawdown":round(max_dd,4),
+         "metric_frequency":metric_frequency,"metric_observations":metric_days,
+         "elapsed_years":round(float(elapsed_years),4),
          "avg_turnover_per_rebalance":round(float(np.mean(turnovers)),4),"rebalance_count":len(curve)}
     if positions:
         pnl=np.array([float(x["net_pnl_usd"]) for x in positions],dtype=float)
@@ -507,11 +537,53 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
         })
         account_curve.append(final_context)
 
-    # Make the account journal strict, unique by date and analytically useful.
-    # Daily P&L/return are derived from mark-to-market equity, not rebalance P&L.
+    # Make the account journal strict and complete. Missing market sessions are
+    # genuine cash days (for example when the meta filter rejects the whole
+    # cross-section), so they must exist with a 0% return instead of disappearing
+    # from the Sharpe/CAGR clock.
     if account_curve:
         dedup={row["date"]:row for row in account_curve}
         account_curve=[dedup[d] for d in sorted(dedup)]
+        first_account_date=pd.Timestamp(account_curve[0]["date"])
+        last_account_date=pd.Timestamp(account_curve[-1]["date"])
+        existing={row["date"]:row for row in account_curve}
+        completed=[]
+        previous_row=None
+        for market_d in all_dates:
+            ts=pd.Timestamp(market_d)
+            if ts<first_account_date or ts>last_account_date:
+                continue
+            key=str(ts.date())
+            if key in existing:
+                row=dict(existing[key])
+            elif previous_row is not None:
+                row={
+                    **previous_row,
+                    "date":key,
+                    "floating_pnl_usd":0.0,
+                    "turnover":0.0,
+                    "cost_usd":0.0,
+                    "trade_count":0,
+                    "gross_exposure":0.0,
+                    "net_exposure":0.0,
+                    "cash_pct":1.0,
+                    "position_count":0,
+                    "largest_weight":0.0,
+                    "active_symbols":[],
+                    "avg_meta_probability":None,
+                    "meta_threshold":None,
+                    "regime":None,
+                    "avg_signal_score":None,
+                    "avg_pair_corr":None,
+                    "max_pair_corr":None,
+                    "portfolio_vol":0.0,
+                }
+            else:
+                continue
+            completed.append(row)
+            previous_row=row
+        account_curve=completed
+
         previous_equity=initial_capital
         previous_balance=initial_capital
         running_peak=initial_capital
@@ -522,13 +594,16 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
             daily_return=current_equity/max(previous_equity,1e-12)-1.0
             running_peak=max(running_peak,current_equity)
             row["daily_pnl_usd"]=round(float(daily_pnl),2)
-            row["daily_return"]=round(float(daily_return),6)
-            row["drawdown"]=round(float(current_equity/max(running_peak,1e-12)-1.0),6)
+            row["daily_return"]=round(float(daily_return),8)
+            row["drawdown"]=round(float(current_equity/max(running_peak,1e-12)-1.0),8)
             row["balance_change_usd"]=round(float(current_balance-previous_balance),2)
             previous_equity=current_equity
             previous_balance=current_balance
 
-    metrics=_metrics(curve,equity,turnovers,252/int(p["rebalance_days"]),positions)
+    metrics=_metrics(
+        curve,equity,turnovers,252/int(p["rebalance_days"]),positions,
+        daily_curve=account_curve,initial_capital=initial_capital
+    )
     metrics["gross_return_sum"]=round(float(np.sum(gross_pnl)),4)
     metrics["costs_sum"]=round(float(np.sum(costs)),4)
     metrics["initial_capital_usd"]=round(initial_capital,2)
