@@ -17,7 +17,7 @@ def run_daily_pipeline(db,force_market=False,refresh_sec=False,progress=None):
         market={"version":fingerprint({"rows":len(bars),"symbols":int(bars.symbol.nunique()),"min":str(bars.date.min()),"max":str(bars.date.max())}),
                 "rows":len(bars),"symbols":int(bars.symbol.nunique()),"earliest":str(bars.date.min()),"latest":str(bars.date.max()),
                 "requested_from":source_meta.get("requested_start"),"feed":source_meta.get("feed"),
-                "universe_mode":"quality_operating_v3","universe_selected":universe_meta.get("selected_count"),
+                "universe_mode":"quality_operating_v4","universe_selected":universe_meta.get("selected_count"),
                 "universe_qualified":universe_meta.get("qualified_count"),"universe_filters":universe_meta.get("filters",{})}
         result["steps"].append({"name":"market_data",**market});set_state(db,"market_data",market)
         if refresh_sec:
