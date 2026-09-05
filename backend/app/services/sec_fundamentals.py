@@ -129,7 +129,8 @@ def point_in_time_panel(symbols, dates, force=False):
     out['roa']=out.get('net_income',np.nan)/out.get('assets',np.nan).replace(0,np.nan)
     out['gross_margin']=out.get('gross_profit',np.nan)/out.get('revenue',np.nan).replace(0,np.nan)
     out['operating_margin']=out.get('operating_income',np.nan)/out.get('revenue',np.nan).replace(0,np.nan)
-    out['fcf']=out.get('operating_cf',np.nan)-out.get('capex',0).fillna(0)
+    capex=out.get('capex',pd.Series(0.0,index=out.index,dtype=float))
+    out['fcf']=out.get('operating_cf',np.nan)-capex.fillna(0)
     out['fcf_margin']=out.fcf/out.get('revenue',np.nan).replace(0,np.nan)
     out['debt_assets']=out.get('debt',np.nan)/out.get('assets',np.nan).replace(0,np.nan)
 
