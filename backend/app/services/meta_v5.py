@@ -6,7 +6,6 @@ from typing import Callable
 
 import numpy as np
 import pandas as pd
-from lightgbm import LGBMRegressor
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.pipeline import make_pipeline
@@ -59,10 +58,17 @@ class DoubleEnsembleLGBM:
     def __init__(self, members: int = 3, seed: int = 42):
         self.members = members
         self.seed = seed
-        self.models: list[LGBMRegressor] = []
+        self.models: list[object] = []
         self.feature_sets: list[list[str]] = []
 
     def fit(self, x: pd.DataFrame, y: pd.Series):
+        # Keep LightGBM optional at API import time. If its native runtime is ever
+        # broken, only META V5 jobs fail with a clear dependency error instead of
+        # taking down FastAPI, the dashboard and health endpoints.
+        try:
+            from lightgbm import LGBMRegressor
+        except (ImportError, OSError) as exc:
+            raise RuntimeError(f"META V5 LightGBM dependency unavailable: {exc}") from exc
         features = list(x.columns)
         weights = np.ones(len(x), dtype=float)
         train_pred = np.zeros(len(x), dtype=float)
