@@ -140,3 +140,66 @@ def test_no_trade_band_reduces_resize_churn():
                            "rank_buffer":1,"rebalance_threshold_pct":.20,"min_trade_notional":100},panel=panel)
     assert len(buffered["order_ledger"])<=len(noisy["order_ledger"])
     assert buffered["metrics"]["estimated_costs_usd"]<=noisy["metrics"]["estimated_costs_usd"]
+
+
+def test_meta_v5_ewma_is_one_sided():
+    from app.services.meta_v5 import _blend
+    dates=pd.bdate_range("2026-01-05",periods=6)
+    base=[]
+    for i,d in enumerate(dates):
+        base.append({"date":d,"symbol":"A","v5_regime":"NEUTRAL",
+                     "rank_ridge":.2+i*.1,"rank_hgb":.3+i*.05,"rank_lgbm":.4+i*.04,"rank_momentum":.5+i*.03})
+    df=pd.DataFrame(base)
+    router={"GLOBAL":{"ridge":.25,"hgb":.25,"lgbm":.25,"momentum":.25},
+            "NEUTRAL":{"ridge":.25,"hgb":.25,"lgbm":.25,"momentum":.25}}
+    for r in ("TREND_UP","HIGH_VOL","RISK_OFF"):router[r]=router["GLOBAL"]
+    a=_blend(df,router)
+    changed=df.copy()
+    changed.loc[changed.index[-1],["rank_ridge","rank_hgb","rank_lgbm","rank_momentum"]]=.999
+    b=_blend(changed,router)
+    assert np.allclose(a["v5_smooth_score"].iloc[:-1],b["v5_smooth_score"].iloc[:-1])
+
+def test_meta_v5_nested_walk_forward_has_outer_embargo(monkeypatch):
+    from app.services import meta_v5
+    from app.services.features import FEATURES
+    dates=pd.bdate_range("2023-01-02",periods=430)
+    symbols=[f"S{i:02d}" for i in range(18)]
+    rows=[]
+    for i,d in enumerate(dates):
+        for si,s in enumerate(symbols):
+            quality=(len(symbols)-si)/len(symbols)
+            row={"date":d,"symbol":s,"sector":"Test","open":100+si+i*.03,"close":100+si+i*.03,
+                 "ret_20d":(quality-.5)*.05,"vol_20d":.18+(si%3)*.01,
+                 "future_relative_20d":(quality-.5)*.02+((i%7)-3)*.0002}
+            for fi,name in enumerate(FEATURES):
+                row[name]=max(.001,min(.999,quality+(fi%3-1)*.01))
+            rows.append(row)
+    panel=pd.DataFrame(rows)
+    monkeypatch.setitem(meta_v5.V5_CONFIG,"min_train_days",320)
+    monkeypatch.setitem(meta_v5.V5_CONFIG,"validation_days",60)
+    monkeypatch.setitem(meta_v5.V5_CONFIG,"test_days",50)
+    monkeypatch.setitem(meta_v5.V5_CONFIG,"lgbm_members",1)
+    scored,summary=meta_v5.build_meta_v5_oos(panel=panel)
+    assert summary["folds"]
+    pos={d:i for i,d in enumerate(sorted(panel.date.unique()))}
+    for fold in summary["folds"]:
+        vto=pd.Timestamp(fold["validation_to"])
+        tfrom=pd.Timestamp(fold["test_from"])
+        assert pos[tfrom]-pos[vto]>=20
+        assert fold["meta"]["calibration_embargo_days"]>=0
+    assert scored["v5_meta_probability"].notna().any()
+
+def test_probability_sizing_can_leave_cash():
+    from app.services.backtest import run_backtest
+    dates=pd.bdate_range("2023-01-02",periods=330)
+    rows=[]
+    for si,s in enumerate(["A","B","C","D"]):
+        for i,d in enumerate(dates):
+            rows.append({"date":d,"symbol":s,"sector":"Test","open":100+si+i*.01,"close":100+si+i*.01,
+                         "score":1-si/4,"scale":.5,"future_relative_20d":0})
+    panel=pd.DataFrame(rows)
+    r=run_backtest({"long_count":2,"short_count":0,"gross_exposure":1,"long_gross":1,
+                    "min_long_count":1,"normalize_position_scale":False},
+                   score_column="score",strategy_name="sized",panel=panel,position_scale_column="scale")
+    first=r["position_ledger"][0]
+    assert first["weight"]<=.25+1e-6
