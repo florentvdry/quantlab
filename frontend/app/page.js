@@ -8,7 +8,7 @@ const num=(v,d=3)=>v==null?'—':Number(v).toFixed(d)
 const JOB_LABELS={
   BACKTEST:'META V2 Backtest',META_V5:'META Ensemble V5',V4_BACKTEST:'META V4 Low-Turnover',ADAPTIVE_BACKTEST:'Adaptive META V3',BASELINE:'Baseline momentum',SWEEP:'Parameter sweep',ROBUSTNESS:'Robustness',
   TRAIN_RIDGE:'Walk-forward Ridge',TRAIN_HGB:'Walk-forward HGB',FACTOR_SUMMARY:'Factor Research',
-  VALIDATION:'Validation Gate',RIDGE_BACKTEST:'Ridge OOS Backtest',HGB_BACKTEST:'HGB OOS Backtest',DATA_REFRESH:'Market data',SEC_REFRESH:'SEC',DAILY_PIPELINE:'Daily Pipeline',
+  VALIDATION:'Validation Gate',META_V5_SIGNALS:'META V5 Signals',RIDGE_BACKTEST:'Ridge OOS Backtest',HGB_BACKTEST:'HGB OOS Backtest',DATA_REFRESH:'Market data',SEC_REFRESH:'SEC',DAILY_PIPELINE:'Daily Pipeline',
   PAPER_SNAPSHOT:'Paper Snapshot'
 }
 const STATUS_LABELS={QUEUED:'En attente',RUNNING:'En cours',COMPLETED:'Terminé',FAILED:'Échec'}
@@ -46,6 +46,7 @@ export default function Home(){
   const [selectedSymbol,setSelectedSymbol]=useState(null)
   const [explain,setExplain]=useState(null)
   const [selectedBacktest,setSelectedBacktest]=useState(null)
+  const [metaSignals,setMetaSignals]=useState(null)
   const [cfg,setCfg]=useState({long_count:20,short_count:20,rebalance_days:5,commission_bps:6,slippage_bps:5,gross_exposure:2,initial_capital:100000,adaptive_lookback_days:252})
 
   const request=async(path,opt)=>{
@@ -66,7 +67,7 @@ export default function Home(){
       ['/api/dashboard',setDash],['/api/system/status',setSys],['/api/setup',setSetup],['/api/jobs',setJobs],
       ['/api/backtests',setBacktests],['/api/factors/latest',setFactors],['/api/system/datasets',setDatasets],
       ['/api/strategies',setStrategies],['/api/models',setModels],['/api/experiments',setExperiments],
-      ['/api/validation/latest',setValidation],['/api/data/quality',setQuality],['/api/paper/positions',setPositions],
+      ['/api/validation/latest',setValidation],['/api/data/quality',setQuality],['/api/meta-v5/signals',setMetaSignals],['/api/paper/positions',setPositions],
       ['/api/paper/orders',setOrders],['/api/paper/fills',setFills],['/api/paper/performance',setPerf]
     ]
     try{
@@ -242,8 +243,15 @@ export default function Home(){
     </>}
 
     {tab==='Signals'&&<>
-      <div className="two">
-        <Card title="Latest Ranking">
+      <Card title="META V5 Current Signal">
+        <div className="row"><button className="btn" onClick={()=>postJob('/api/jobs/meta-v5-signals','META V5 Signals',{})}>Generate V5 Signals</button></div>
+        {!metaSignals||metaSignals.status==='NOT_RUN'?<Empty>Aucun signal V5 généré.</Empty>:<>
+          <div className="metricRow topGap"><span>Market date <b>{metaSignals.market_date}</b></span><span>Regime <b>{metaSignals.signals?.[0]?.regime||'—'}</b></span><span>Accepted <b>{metaSignals.accepted_count||0}</b></span><span>Paper <b>{metaSignals.paper_execution}</b></span></div>
+          <div className="tableScroll"><table><thead><tr><th>#</th><th>Symbol</th><th>Accepted</th><th>Probability</th><th>Smooth score</th><th>Size scale</th><th>Regime</th></tr></thead><tbody>{(metaSignals.signals||[]).slice(0,40).map(r=><tr key={r.symbol}><td>#{r.rank}</td><td><b>{r.symbol}</b></td><td><Pill ok={r.accepted}>{r.accepted?'TRADE':'SKIP'}</Pill></td><td>{pct(r.meta_probability)}</td><td>{num(r.smooth_score,4)}</td><td>{pct(r.position_scale)}</td><td>{r.regime}</td></tr>)}</tbody></table></div>
+        </>}
+      </Card>
+      <div className="two section">
+        <Card title="Legacy Factor Ranking">
           {!factors.length?<Empty>Aucun signal.</Empty>:<table><thead><tr><th>#</th><th>Symbol</th><th>Score</th><th>Momentum</th><th>Fund.</th><th>Earnings</th></tr></thead><tbody>{factors.slice(0,30).map((r,i)=><tr className="clickable" key={r.symbol} onClick={()=>showExplain(r.symbol)}><td>{i+1}</td><td><b>{r.symbol}</b></td><td>{r.meta_score}</td><td>{r.momentum_12_1_rank}</td><td>{r.fundamental_raw_rank}</td><td>{r.earnings_raw_rank}</td></tr>)}</tbody></table>}
         </Card>
         <Card title={selectedSymbol?('Why '+selectedSymbol+'?'):'Signal Explainability'}>
