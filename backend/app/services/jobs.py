@@ -4,11 +4,11 @@ from datetime import datetime
 from redis import Redis
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.models.entities import JobRun, ExperimentRun, ModelVersion, BacktestRun
+from app.models.entities import JobRun, ExperimentRun, ModelVersion, BacktestRun, SystemState
 from app.services.backtest import run_backtest, run_momentum_baseline, run_adaptive_meta, run_meta_v4
 from app.services.experiments import parameter_sweep, robustness
 from app.services.research import train_walk_forward, factor_summary, run_model_oos_backtest
-from app.services.meta_v5 import run_meta_v5
+from app.services.meta_v5 import run_meta_v5, latest_meta_v5_signals
 
 QUEUE="quantlab:jobs"
 
@@ -44,6 +44,15 @@ def execute_job(key:str):
             update(db,row,progress=20,result_json=json.dumps({"message":"Construction des features et du portefeuille"}))
             result=run_backtest(p); result["backtest_id"]=_persist_backtest(db,result)
             update(db,row,progress=90,result_json=json.dumps({"message":"Calcul des métriques"}))
+        elif row.kind=="META_V5_SIGNALS":
+            def progress_sig(value,message):
+                update(db,row,progress=value,result_json=json.dumps({"message":message}))
+            result=latest_meta_v5_signals(progress=progress_sig)
+            state=db.query(SystemState).filter(SystemState.key=="meta_v5.latest_signals").first()
+            if not state:
+                state=SystemState(key="meta_v5.latest_signals",value_json="{}");db.add(state)
+            state.value_json=json.dumps(result,default=str);state.updated_at=datetime.utcnow();db.commit()
+            update(db,row,progress=95,result_json=json.dumps({"message":"META V5 signals saved"}))
         elif row.kind=="META_V5":
             def progress_v5(value,message):
                 update(db,row,progress=value,result_json=json.dumps({"message":message}))
