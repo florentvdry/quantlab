@@ -17,6 +17,8 @@ function BacktestDetail({detail,registry,fetchBacktest}){
   const target=detail.meta_v71?.target||detail.meta_v7?.target||detail.meta_v6?.target
   const riskOverlay=detail.meta_v71?.risk_overlay||detail.meta_v7?.risk_overlay
   const exposureOverlay=detail.meta_v71?.exposure_overlay
+  const scenarioBundle=detail.meta_v7_validation||detail.meta_v71_validation
+  const scenarios=safeArray(scenarioBundle?.scenarios)
   const stats=[
     ['CAGR',pct(metrics.cagr)],
     ['Sharpe',num(metrics.sharpe,2)],
@@ -65,6 +67,40 @@ function BacktestDetail({detail,registry,fetchBacktest}){
       </div>}
       <BacktestAnalytics detail={detail} registry={registry} fetchBacktest={fetchBacktest}/>
     </Panel>
+
+    {scenarios.length>0&&<Panel>
+      <PanelHeader title={'Stress tests · '+scenarios.length} eyebrow="Même alpha OOS · paramètres de risque/coûts"/>
+      <TableWrap className="max-h-[440px]">
+        <table className={cn(tableClass,'min-w-[980px]')}>
+          <thead className="sticky top-0 bg-[#0f1217]"><tr>
+            <th className={thClass}>Scenario</th>
+            <th className={thClass}>CAGR</th>
+            <th className={thClass}>Sharpe</th>
+            <th className={thClass}>Max DD</th>
+            <th className={thClass}>PF</th>
+            <th className={thClass}>Costs</th>
+            <th className={thClass}>Risk floor</th>
+            <th className={thClass}>Mean scale</th>
+            <th className={thClass}>Names</th>
+          </tr></thead>
+          <tbody>{scenarios.map(row=>{
+            const overlay=row.risk_overlay||{}
+            const isBase=row.scenario==='base'
+            return <tr key={row.scenario} className={cn(isBase?'bg-indigo-400/[0.045]':'','hover:bg-white/[0.02]')}>
+              <td className={cn(tdClass,isBase?'font-semibold text-indigo-300':'font-medium text-slate-200')}>{row.scenario}</td>
+              <td className={tdClass}>{pct(row.cagr)}</td>
+              <td className={cn(tdClass,Number(row.sharpe)>=.75?'text-emerald-300':'text-amber-300')}>{num(row.sharpe,2)}</td>
+              <td className={cn(tdClass,Number(row.max_drawdown)<=-.15?'text-rose-300':'text-slate-300')}>{pct(row.max_drawdown)}</td>
+              <td className={tdClass}>{num(row.profit_factor,2)}</td>
+              <td className={tdClass}>{money(row.estimated_costs_usd)}</td>
+              <td className={tdClass}>{overlay.market_risk_floor==null?'—':pct(overlay.market_risk_floor)}</td>
+              <td className={tdClass}>{overlay.mean_position_scale==null?'—':pct(overlay.mean_position_scale)}</td>
+              <td className={tdClass}>{overlay.mean_selected_names==null?'—':num(overlay.mean_selected_names,1)}</td>
+            </tr>
+          })}</tbody>
+        </table>
+      </TableWrap>
+    </Panel>}
 
     <Panel>
       <PanelHeader title={'Positions / P&L · '+positions.length} eyebrow="Signal → Entry → Exit"/>
