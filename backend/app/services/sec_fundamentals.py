@@ -129,6 +129,26 @@ def point_in_time_panel(symbols, dates, force=False):
     out['fcf']=out.get('operating_cf',np.nan)-out.get('capex',0).fillna(0)
     out['fcf_margin']=out.fcf/out.get('revenue',np.nan).replace(0,np.nan)
     out['debt_assets']=out.get('debt',np.nan)/out.get('assets',np.nan).replace(0,np.nan)
+
+    core_cols=['revenue','net_income','assets','equity','operating_cf']
+    core_frame=pd.concat(
+        [out.get(name,pd.Series(index=out.index,dtype=float)).rename(name) for name in core_cols],
+        axis=1,
+    )
+    out['sec_core_metrics']=core_frame.notna().sum(axis=1)
+    assets=out.get('assets',pd.Series(index=out.index,dtype=float))
+    equity=out.get('equity',pd.Series(index=out.index,dtype=float))
+    revenue=out.get('revenue',pd.Series(index=out.index,dtype=float))
+    net_income=out.get('net_income',pd.Series(index=out.index,dtype=float))
+    operating_cf=out.get('operating_cf',pd.Series(index=out.index,dtype=float))
+    out['solid_fundamental_eligible']=(
+        (out['sec_core_metrics']>=int(settings.real_universe_min_sec_core_metrics))
+        &assets.gt(0)
+        &equity.gt(0)
+        &(revenue.gt(0)|net_income.notna())
+        &(net_income.gt(0)|operating_cf.gt(0))
+    ).fillna(False)
+
     # Composite deliberately excludes valuation until historical shares/market-cap alignment is complete.
     quality=pd.concat([out.roe,out.roa,out.gross_margin,out.operating_margin,out.fcf_margin,-out.debt_assets],axis=1)
     out['fundamental_raw']=quality.replace([np.inf,-np.inf],np.nan).mean(axis=1,skipna=True)
