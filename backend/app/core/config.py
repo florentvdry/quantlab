@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     real_universe_size:int=120; real_universe_prefilter_size:int=250
     real_universe_min_price:float=10.0; real_universe_min_history_sessions:int=1000
     real_universe_min_median_dollar_volume:float=50000000.0; real_universe_max_volatility:float=0.65
-    real_universe_min_sec_core_metrics:int=3
+    real_trade_min_history_sessions:int=700; real_universe_min_sec_core_metrics:int=3
     sec_user_agent:str='QuantLab local research contact@example.com'
     trading_env:str='PAPER'; paper_auto_enabled:bool=False; allow_alpaca_paper_orders:bool=False
     paper_auto_weekday:int=0; paper_auto_hour_et:int=9; paper_auto_minute_et:int=35; paper_auto_top_n:int=20
