@@ -30,7 +30,8 @@ function BacktestDetail({detail}){
         {stats.map(item=><div key={item[0]} className="bg-[#0d1015] p-4"><div className="text-[10px] uppercase tracking-wider text-slate-600">{item[0]}</div><div className="mt-1 text-sm font-semibold text-slate-100">{item[1]}</div></div>)}
       </div>
       <div className="border-t border-white/6 px-5 py-3 text-xs text-slate-600">
-        {detail.dataset?.mode||'—'} · {detail.dataset?.backtest_from||detail.dataset?.from||'?'} → {detail.dataset?.backtest_to||detail.dataset?.to||'?'} · {detail.execution_timing||'timing n/a'}
+        <div>{detail.dataset?.mode||'—'} · trades {detail.dataset?.backtest_from||detail.dataset?.from||'?'} → {detail.dataset?.backtest_to||detail.dataset?.to||'?'} · {detail.execution_timing||'timing n/a'}</div>
+        {detail.dataset?.raw_market_from&&<div className="mt-1 text-slate-700">raw market {detail.dataset.raw_market_from} → {detail.dataset.raw_market_to||'?'} · feature-valid from {detail.dataset.from||'?'}</div>}
       </div>
       {simulation&&<div className="border-t border-indigo-300/10 bg-indigo-400/[0.035] px-5 py-4">
         <div className="text-[10px] font-semibold uppercase tracking-[.15em] text-indigo-300">Continuous walk-forward</div>
