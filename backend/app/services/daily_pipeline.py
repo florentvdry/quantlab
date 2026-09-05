@@ -9,11 +9,13 @@ def run_daily_pipeline(db,force_market=False,refresh_sec=False,progress=None):
     progress=progress or (lambda *_:None)
     result={"started_at":datetime.now(timezone.utc).isoformat(),"mode":settings.data_mode,"steps":[]}
     if settings.data_mode.lower()=="alpaca":
-        from app.services.real_data import fetch_bars
+        from app.services.real_data import fetch_bars,market_data_metadata
         progress(15,"Téléchargement des données de marché")
         bars=fetch_bars(force=force_market)
-        market={"version":fingerprint({"rows":len(bars),"symbols":int(bars.symbol.nunique()),"max":str(bars.date.max())}),
-                "rows":len(bars),"symbols":int(bars.symbol.nunique()),"latest":str(bars.date.max())}
+        source_meta=market_data_metadata()
+        market={"version":fingerprint({"rows":len(bars),"symbols":int(bars.symbol.nunique()),"min":str(bars.date.min()),"max":str(bars.date.max())}),
+                "rows":len(bars),"symbols":int(bars.symbol.nunique()),"earliest":str(bars.date.min()),"latest":str(bars.date.max()),
+                "requested_from":source_meta.get("requested_start"),"feed":source_meta.get("feed")}
         result["steps"].append({"name":"market_data",**market});set_state(db,"market_data",market)
         if refresh_sec:
             from app.services.real_data import universe
