@@ -138,6 +138,12 @@ def validation_latest(db:Session=Depends(get_db)):
     if not r:return {"status":"NOT_RUN","passed":False}
     return {"status":"COMPLETED",**json.loads(r.result_json or "{}")}
 
+@app.get("/api/meta-v5/signals")
+def meta_v5_signals(db:Session=Depends(get_db)):
+    row=db.query(SystemState).filter(SystemState.key=="meta_v5.latest_signals").first()
+    if not row:return {"status":"NOT_RUN","signals":[],"accepted_signals":[]}
+    return json.loads(row.value_json or "{}")
+
 @app.get("/api/system/datasets")
 def datasets(db:Session=Depends(get_db)):
     from app.services.dataset_state import states
@@ -187,6 +193,8 @@ def promote(strategy_id:int,db:Session=Depends(get_db)):
 def job_backtest(req:BacktestRequest):return enqueue("BACKTEST",req.model_dump())
 @app.post("/api/jobs/meta-v5")
 def job_meta_v5(req:BacktestRequest):return enqueue("META_V5",req.model_dump())
+@app.post("/api/jobs/meta-v5-signals")
+def job_meta_v5_signals():return enqueue("META_V5_SIGNALS",{})
 @app.post("/api/jobs/v4-backtest")
 def job_v4_backtest():return enqueue("V4_BACKTEST",{})
 @app.post("/api/jobs/adaptive-backtest")
