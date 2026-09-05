@@ -17,6 +17,7 @@ export const JOB_LABELS={
   META_V5:'META Ensemble V5',
   META_V6:'META Ensemble V6',
   META_V7:'META Ensemble V7',
+  META_V71:'META Ensemble V7.1',
   META_V5_SIGNALS:'META V5 Signals',
   VALIDATION:'Validation Gate',
   FACTOR_SUMMARY:'Factor Research',
