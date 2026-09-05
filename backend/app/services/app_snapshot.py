@@ -59,6 +59,8 @@ def _job(row):
     return {
         "id":row.id,"job_key":row.job_key,"kind":row.kind,"status":row.status,
         "progress":row.progress,"message":result.get("message"),"error":row.error,
+        "backtest_id":result.get("backtest_id"),
+        "model_version_id":result.get("model_version_id"),
         "created_at":row.created_at,"updated_at":row.updated_at,
         "started_at":row.started_at,"completed_at":row.completed_at,
     }
