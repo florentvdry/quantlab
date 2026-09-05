@@ -947,7 +947,7 @@ function JobsTable({jobs}){
   if(!jobs.length)return <Empty>Aucun job lancé.</Empty>
   return <table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody>{jobs.slice(0,30).map(j=><tr key={j.job_key}><td>{JOB_LABELS[j.kind]||j.kind}</td><td><span className={'pill '+String(j.status).toLowerCase()}>{STATUS_LABELS[j.status]||j.status}</span></td><td><div className="progress compact"><span style={{width:(j.progress||0)+'%'}}/></div><small>{j.progress}%</small></td><td>{j.error?<span className="negative">{j.error}</span>:(j.message||'—')}</td></tr>)}</tbody></table>
 }
-+num(t.exit_price,2)}</td><td>{num(t.qty,3)}</td><td>{pct(t.asset_return)}</td><td className={(t.gross_pnl_usd||0)>=0?'positive':'negative'}>{'
++num(t.exit_price,2)}</td><td>{num(t.qty,3)}</td><td>{pct(t.position_return??(t.side==='LONG'?t.asset_return:-t.asset_return))}</td><td className={(t.gross_pnl_usd||0)>=0?'positive':'negative'}>{'
       <Card title="Backtest Registry" className="section">{!backtests.length?<Empty>Aucun backtest.</Empty>:<table><thead><tr><th>#</th><th>Strategy</th><th>Data</th><th>Period</th><th>CAGR</th><th>Sharpe</th><th>Max DD</th></tr></thead><tbody>{backtests.map(b=><tr key={b.id} className="clickable" onClick={()=>openBacktest(b.id)}><td>#{b.id}</td><td>{b.strategy}</td><td>{b.dataset?.mode||'legacy'}</td><td>{b.dataset?.from&&b.dataset?.to?(b.dataset.from+' → '+b.dataset.to):'—'}</td><td>{pct(b.cagr)}</td><td>{b.sharpe}</td><td>{pct(b.max_drawdown)}</td></tr>)}</tbody></table>}</Card>
     </>}
 
