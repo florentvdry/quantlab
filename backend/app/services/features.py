@@ -5,7 +5,7 @@ import pandas as pd
 from app.core.config import settings
 from app.services.data import synthetic_panel
 
-FEATURE_SCHEMA_VERSION="4"
+FEATURE_SCHEMA_VERSION="5"
 FEATURES=["momentum_12_1_rank","ret_60d_rank","ret_20d_rank","trend_50_rank","trend_200_rank","fundamental_raw_rank","earnings_raw_rank","news_raw_rank","low_vol_rank","liquidity_rank"]
 STORE_DIR=os.getenv("QUANTLAB_DATA_DIR","/data");STORE_PATH=f"{STORE_DIR}/feature_store.parquet";META_PATH=f"{STORE_DIR}/feature_store.json"
 _PANEL_CACHE=None;_PANEL_CACHE_AT=0.0
