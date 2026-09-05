@@ -232,6 +232,7 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
     risk_source=df[["date","symbol","close"]].drop_duplicates(["date","symbol"]).sort_values(["symbol","date"]).copy()
     risk_source["_ret_1d"]=risk_source.groupby("symbol")["close"].pct_change(fill_method=None)
     risk_returns=risk_source.pivot(index="date",columns="symbol",values="_ret_1d").sort_index()
+    benchmark_open=df[["date","symbol","open"]].drop_duplicates(["date","symbol"]).pivot(index="date",columns="symbol",values="open").sort_index()
     ic_frame=_daily_ic_frame(df) if adaptive else None
     adaptive_eval_ic=[]
     total_cost_rate=(float(p["commission_bps"])+float(p["slippage_bps"]))/10000
@@ -600,6 +601,37 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
             previous_equity=current_equity
             previous_balance=current_balance
 
+    benchmark_account_curve=[]
+    benchmark_metrics=None
+    if account_curve:
+        start_date=pd.Timestamp(account_curve[0]["date"])
+        end_date=pd.Timestamp(account_curve[-1]["date"])
+        bm_returns=benchmark_open.pct_change(fill_method=None).mean(axis=1,skipna=True)
+        bm_equity_usd=initial_capital
+        for i,row in enumerate(account_curve):
+            d=pd.Timestamp(row["date"])
+            daily_ret=0.0 if i==0 else float(bm_returns.get(d,0.0) or 0.0)
+            if not np.isfinite(daily_ret):
+                daily_ret=0.0
+            bm_equity_usd*=1+daily_ret
+            benchmark_account_curve.append({
+                "date":row["date"],
+                "equity_usd":round(float(bm_equity_usd),2),
+                "balance_usd":round(float(bm_equity_usd),2),
+                "daily_return":round(float(daily_ret),8),
+            })
+        benchmark_metrics=_metrics(
+            benchmark_curve if len(benchmark_curve)>=2 else [
+                {"date":account_curve[0]["date"],"equity":1.0,"return":0.0},
+                {"date":account_curve[-1]["date"],"equity":bm_equity_usd/initial_capital,"return":0.0},
+            ],
+            bm_equity_usd/initial_capital,
+            [0.0],
+            252/int(p["rebalance_days"]),
+            daily_curve=benchmark_account_curve,
+            initial_capital=initial_capital,
+        )
+
     metrics=_metrics(
         curve,equity,turnovers,252/int(p["rebalance_days"]),positions,
         daily_curve=account_curve,initial_capital=initial_capital
@@ -618,10 +650,12 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
     metrics["long_costs_usd"]=round(long_costs,2);metrics["short_costs_usd"]=round(short_costs,2)
     metrics["long_pnl_usd"]=round(long_gross_pnl-long_costs,2)
     metrics["short_pnl_usd"]=round(short_gross_pnl-short_costs,2)
-    if len(benchmark_curve)>1:
-        bm=_metrics(benchmark_curve,benchmark_equity,[0.0]*len(benchmark_curve),252/int(p["rebalance_days"]))
-        metrics["benchmark_cagr"]=bm["cagr"];metrics["benchmark_sharpe"]=bm["sharpe"];metrics["benchmark_max_drawdown"]=bm["max_drawdown"]
-        metrics["excess_cagr_vs_equal_weight"]=round(metrics["cagr"]-bm["cagr"],4)
+    if benchmark_metrics is not None:
+        metrics["benchmark_cagr"]=benchmark_metrics["cagr"]
+        metrics["benchmark_sharpe"]=benchmark_metrics["sharpe"]
+        metrics["benchmark_max_drawdown"]=benchmark_metrics["max_drawdown"]
+        metrics["benchmark_metric_frequency"]=benchmark_metrics["metric_frequency"]
+        metrics["excess_cagr_vs_equal_weight"]=round(metrics["cagr"]-benchmark_metrics["cagr"],4)
     try:
         ic=df.groupby("date").apply(
             lambda x:x[score_column].corr(x["future_relative_20d"],method="spearman"),
@@ -646,7 +680,7 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
         "execution_timing":"signal_close_T__entry_open_T1",
         "audit_note":"Prices are next-open rebalance marks. Orders show simulated BUY/SELL/SHORT/COVER activity; position_ledger attributes P&L between consecutive rebalance opens.",
         "metrics":metrics,"equity_curve":curve,"account_curve":account_curve,
-        "benchmark":{"name":"Equal-weight current universe (no costs)","equity_curve":benchmark_curve},
+        "benchmark":{"name":"Equal-weight current universe daily open-to-open (no costs)","equity_curve":benchmark_curve,"account_curve":benchmark_account_curve,"metrics":benchmark_metrics},
         "ranking_top":[{"rank":i+1,"symbol":r.symbol,"sector":r.sector,"score":round(float(getattr(r,score_column)),4)} for i,r in enumerate(rank_sample.head(30).itertuples())],
         "ranking_bottom":[{"rank":len(rank_sample)-29+i,"symbol":r.symbol,"sector":r.sector,"score":round(float(getattr(r,score_column)),4)} for i,r in enumerate(rank_sample.tail(30).itertuples())],
         "rebalance_ledger":rebalances,
