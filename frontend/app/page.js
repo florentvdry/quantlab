@@ -69,7 +69,7 @@ export default function Home(){
   },[selectedBacktest])
 
   const activeJob=useMemo(()=>snapshot?.jobs?.find(j=>j.status==='RUNNING'||j.status==='QUEUED'),[snapshot])
-  const candidateRunning=Boolean(snapshot?.jobs?.find(j=>j.kind==='META_V6'&&(j.status==='RUNNING'||j.status==='QUEUED')))
+  const candidateRunning=Boolean(snapshot?.jobs?.find(j=>j.kind==='META_V7'&&(j.status==='RUNNING'||j.status==='QUEUED')))
 
   const refreshAll=async()=>{
     setRefreshing(true)
@@ -85,7 +85,7 @@ export default function Home(){
 
   const runCandidate=async()=>{
     try{
-      await api('/api/jobs/meta-v6',{method:'POST'})
+      await api('/api/jobs/meta-v7',{method:'POST'})
       await loadSnapshot(false)
     }catch(e){
       setError(e.message)
