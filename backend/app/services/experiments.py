@@ -1,6 +1,6 @@
 from __future__ import annotations
 import itertools, numpy as np
-from app.services.backtest import run_backtest
+from app.services.backtest import run_backtest, run_adaptive_meta
 from app.services.features import build_feature_panel
 
 def parameter_sweep(base=None,grid=None,panel=None):
@@ -14,9 +14,10 @@ def parameter_sweep(base=None,grid=None,panel=None):
     rows.sort(key=lambda x:x["sharpe"],reverse=True)
     return {"count":len(rows),"best":rows[0] if rows else None,"results":rows}
 
-def robustness(base=None,panel=None):
+def robustness(base=None,panel=None,adaptive=False):
     base=base or {}
     panel=build_feature_panel() if panel is None else panel
+    runner=(lambda p:run_adaptive_meta(p,panel=panel)) if adaptive else (lambda p:run_backtest(p,panel=panel))
     c=float(base.get("commission_bps",6));s=float(base.get("slippage_bps",5))
     scenarios=[
         ("base",{}),("costs_x2",{"commission_bps":c*2,"slippage_bps":s*2}),("costs_x3",{"commission_bps":c*3,"slippage_bps":s*3}),
@@ -26,7 +27,7 @@ def robustness(base=None,panel=None):
     ]
     rows=[]
     for name,override in scenarios:
-        r=run_backtest(base|override,panel=panel);rows.append({"scenario":name,**r["metrics"]})
+        r=runner(base|override);rows.append({"scenario":name,**r["metrics"]})
     sharpes=[x["sharpe"] for x in rows];positive=sum(x>0 for x in sharpes)/len(sharpes)
     stressed=[x for x in rows if x["scenario"] in ("costs_x2","costs_x3")]
     cost_stress_pass=all(x["sharpe"]>0 for x in stressed)
