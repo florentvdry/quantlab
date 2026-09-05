@@ -12,6 +12,32 @@ from app.services.meta_v5 import run_meta_v5, latest_meta_v5_signals
 
 QUEUE="quantlab:jobs"
 
+RESEARCH_JOB_KINDS={
+    "BACKTEST","META_V5","V4_BACKTEST","ADAPTIVE_BACKTEST","BASELINE",
+    "SWEEP","ROBUSTNESS","RIDGE_BACKTEST","HGB_BACKTEST",
+    "TRAIN_RIDGE","TRAIN_HGB","FACTOR_SUMMARY","VALIDATION","META_V5_SIGNALS",
+}
+
+def _ensure_research_data(db,row):
+    if row.kind not in RESEARCH_JOB_KINDS:
+        return
+    from app.services.features import feature_store_status
+    status=feature_store_status()
+    if status.get("ready"):
+        return
+    from app.services.daily_pipeline import run_daily_pipeline
+    def bootstrap_progress(value,message):
+        mapped=min(30,max(6,6+int(float(value)*0.24)))
+        update(db,row,progress=mapped,result_json=json.dumps({
+            "message":"Préparation des données — "+str(message),
+            "feature_store":status,
+        },default=str))
+    update(db,row,progress=6,result_json=json.dumps({
+        "message":"Feature Store absent/obsolète — reconstruction automatique",
+        "feature_store":status,
+    },default=str))
+    run_daily_pipeline(db,force_market=False,refresh_sec=False,progress=bootstrap_progress)
+
 def redis_client(): return Redis.from_url(settings.redis_url,decode_responses=True)
 
 def enqueue(kind:str,payload:dict|None=None):
@@ -40,6 +66,7 @@ def execute_job(key:str):
     try:
         update(db,row,status="RUNNING",progress=5,started_at=datetime.utcnow(),result_json=json.dumps({"message":"Initialisation"}))
         p=json.loads(row.payload_json or "{}")
+        _ensure_research_data(db,row)
         if row.kind=="BACKTEST":
             update(db,row,progress=20,result_json=json.dumps({"message":"Construction des features et du portefeuille"}))
             result=run_backtest(p); result["backtest_id"]=_persist_backtest(db,result)
