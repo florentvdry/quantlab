@@ -355,6 +355,7 @@ def _apply_meta(frame: pd.DataFrame, meta: MetaLayer) -> pd.DataFrame:
     prob = meta.predict(out)
     out["v5_meta_probability"] = prob
     threshold = float(meta.threshold)
+    out["v5_threshold"] = threshold
     accepted = prob >= threshold
     denom = max(0.90 - threshold, 0.10)
     confidence = np.clip((prob - threshold) / denom, 0.0, 1.0)
