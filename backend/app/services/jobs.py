@@ -9,6 +9,7 @@ from app.services.backtest import run_backtest, run_momentum_baseline, run_adapt
 from app.services.experiments import parameter_sweep, robustness
 from app.services.research import train_walk_forward, factor_summary, run_model_oos_backtest
 from app.services.meta_v5 import run_meta_v5, latest_meta_v5_signals, meta_v5_validation_bundle
+from app.services.json_utils import safe_dumps
 
 QUEUE="quantlab:jobs"
 WORKER_HEARTBEAT="quantlab:worker:heartbeat"
@@ -30,11 +31,11 @@ def _ensure_research_data(db,row):
     from app.services.daily_pipeline import run_daily_pipeline
     def bootstrap_progress(value,message):
         mapped=min(30,max(6,6+int(float(value)*0.24)))
-        update(db,row,progress=mapped,result_json=json.dumps({
+        update(db,row,progress=mapped,result_json=safe_dumps({
             "message":"Préparation des données — "+str(message),
             "feature_store":status,
         },default=str))
-    update(db,row,progress=6,result_json=json.dumps({
+    update(db,row,progress=6,result_json=safe_dumps({
         "message":"Feature Store absent/obsolète — reconstruction automatique",
         "feature_store":status,
     },default=str))
@@ -49,7 +50,7 @@ def enqueue(kind:str,payload:dict|None=None):
             active=db.query(JobRun).filter(JobRun.kind==kind,JobRun.status.in_(["QUEUED","RUNNING"])).order_by(JobRun.id.desc()).first()
             if active:
                 return {"id":active.id,"job_key":active.job_key,"kind":kind,"status":active.status,"deduplicated":True}
-        row=JobRun(job_key=key,kind=kind,status="QUEUED",progress=0,payload_json=json.dumps(payload or {}))
+        row=JobRun(job_key=key,kind=kind,status="QUEUED",progress=0,payload_json=safe_dumps(payload or {}))
         db.add(row); db.commit(); db.refresh(row)
         redis_client().rpush(QUEUE,key)
         return {"id":row.id,"job_key":key,"kind":kind,"status":"QUEUED","deduplicated":False}
@@ -63,15 +64,15 @@ def _save_state(db,key,value):
     row=db.query(SystemState).filter(SystemState.key==key).first()
     if not row:
         row=SystemState(key=key,value_json="{}");db.add(row)
-    row.value_json=json.dumps(value,default=str);row.updated_at=datetime.utcnow();db.commit()
+    row.value_json=safe_dumps(value,default=str);row.updated_at=datetime.utcnow();db.commit()
     return row
 
 def _persist_meta_v5_model(db,result):
     last=db.query(ModelVersion).filter(ModelVersion.name=="META_V5").order_by(ModelVersion.version.desc()).first()
     mv=ModelVersion(
         name="META_V5",version=(last.version+1 if last else 1),model_type="meta_ensemble",
-        metrics_json=json.dumps(result.get("meta_v5",{}),default=str),
-        config_json=json.dumps({"portfolio":result.get("params",{}),"architecture":result.get("meta_v5",{}).get("architecture",{})},default=str)
+        metrics_json=safe_dumps(result.get("meta_v5",{}),default=str),
+        config_json=safe_dumps({"portfolio":result.get("params",{}),"architecture":result.get("meta_v5",{}).get("architecture",{})},default=str)
     )
     db.add(mv);db.commit();db.refresh(mv)
     return mv.id
@@ -79,7 +80,7 @@ def _persist_meta_v5_model(db,result):
 def _persist_backtest(db,result):
     m=result["metrics"]
     row=BacktestRun(strategy_name=result["strategy"],cagr=m["cagr"],sharpe=m["sharpe"],max_drawdown=m["max_drawdown"],
-                    volatility=m["volatility"],turnover=m["avg_turnover_per_rebalance"],payload_json=json.dumps(result,default=str))
+                    volatility=m["volatility"],turnover=m["avg_turnover_per_rebalance"],payload_json=safe_dumps(result,default=str))
     db.add(row); db.commit(); db.refresh(row)
     return row.id
 
@@ -87,17 +88,17 @@ def execute_job(key:str):
     db=SessionLocal(); row=db.query(JobRun).filter(JobRun.job_key==key).first()
     if not row: db.close(); return
     try:
-        update(db,row,status="RUNNING",progress=5,started_at=datetime.utcnow(),result_json=json.dumps({"message":"Initialisation"}))
+        update(db,row,status="RUNNING",progress=5,started_at=datetime.utcnow(),result_json=safe_dumps({"message":"Initialisation"}))
         p=json.loads(row.payload_json or "{}")
         _ensure_research_data(db,row)
         if row.kind=="AUTO_BOOTSTRAP":
             from app.services.daily_pipeline import run_daily_pipeline
             from app.services.features import build_feature_panel
             from app.services.validation import validation_report
-            update(db,row,progress=6,result_json=json.dumps({"message":"Autopilot — préparation des données"}))
+            update(db,row,progress=6,result_json=safe_dumps({"message":"Autopilot — préparation des données"}))
             def pipeline_progress(value,message):
                 mapped=6+int(min(100,max(0,float(value)))*0.24)
-                update(db,row,progress=min(30,mapped),result_json=json.dumps({"message":"Autopilot / Data — "+str(message)}))
+                update(db,row,progress=min(30,mapped),result_json=safe_dumps({"message":"Autopilot / Data — "+str(message)}))
             pipeline=run_daily_pipeline(
                 db,
                 force_market=bool(p.get("force_market",False)),
@@ -105,23 +106,23 @@ def execute_job(key:str):
                 progress=pipeline_progress,
             )
             panel=build_feature_panel()
-            update(db,row,progress=32,result_json=json.dumps({"message":"Autopilot — Factor Research"}))
+            update(db,row,progress=32,result_json=safe_dumps({"message":"Autopilot — Factor Research"}))
             factors=factor_summary(panel);_save_state(db,"research.factor_summary",factors)
 
             def v5_progress(value,message):
                 mapped=36+int(min(100,max(0,float(value)))*0.38)
-                update(db,row,progress=min(76,mapped),result_json=json.dumps({"message":"Autopilot / META V5 — "+str(message)}))
+                update(db,row,progress=min(76,mapped),result_json=safe_dumps({"message":"Autopilot / META V5 — "+str(message)}))
             bundle=meta_v5_validation_bundle(panel=panel,progress=v5_progress)
             candidate=bundle["backtest"]
             candidate["backtest_id"]=_persist_backtest(db,candidate)
             candidate["model_version_id"]=_persist_meta_v5_model(db,candidate)
-            update(db,row,progress=78,result_json=json.dumps({"message":"Autopilot — Validation Gate"}))
+            update(db,row,progress=78,result_json=safe_dumps({"message":"Autopilot — Validation Gate"}))
             validation=validation_report(p, panel=panel, bundle=bundle)
             _save_state(db,"validation.latest",{"status":"COMPLETED",**validation})
 
             def signal_progress(value,message):
                 mapped=86+int(min(100,max(0,float(value)))*0.10)
-                update(db,row,progress=min(96,mapped),result_json=json.dumps({"message":"Autopilot / Signals — "+str(message)}))
+                update(db,row,progress=min(96,mapped),result_json=safe_dumps({"message":"Autopilot / Signals — "+str(message)}))
             signals=latest_meta_v5_signals(panel=panel,progress=signal_progress)
             _save_state(db,"meta_v5.latest_signals",signals)
             result={
@@ -134,72 +135,72 @@ def execute_job(key:str):
                 "signals":{"market_date":signals.get("market_date"),"accepted_count":signals.get("accepted_count"),"paper_execution":signals.get("paper_execution")},
             }
         elif row.kind=="BACKTEST":
-            update(db,row,progress=20,result_json=json.dumps({"message":"Construction des features et du portefeuille"}))
+            update(db,row,progress=20,result_json=safe_dumps({"message":"Construction des features et du portefeuille"}))
             result=run_backtest(p); result["backtest_id"]=_persist_backtest(db,result)
-            update(db,row,progress=90,result_json=json.dumps({"message":"Calcul des métriques"}))
+            update(db,row,progress=90,result_json=safe_dumps({"message":"Calcul des métriques"}))
         elif row.kind=="META_V5_SIGNALS":
             def progress_sig(value,message):
-                update(db,row,progress=value,result_json=json.dumps({"message":message}))
+                update(db,row,progress=value,result_json=safe_dumps({"message":message}))
             result=latest_meta_v5_signals(progress=progress_sig)
             state=db.query(SystemState).filter(SystemState.key=="meta_v5.latest_signals").first()
             if not state:
                 state=SystemState(key="meta_v5.latest_signals",value_json="{}");db.add(state)
-            state.value_json=json.dumps(result,default=str);state.updated_at=datetime.utcnow();db.commit()
-            update(db,row,progress=95,result_json=json.dumps({"message":"META V5 signals saved"}))
+            state.value_json=safe_dumps(result,default=str);state.updated_at=datetime.utcnow();db.commit()
+            update(db,row,progress=95,result_json=safe_dumps({"message":"META V5 signals saved"}))
         elif row.kind=="META_V5":
             def progress_v5(value,message):
-                update(db,row,progress=value,result_json=json.dumps({"message":message}))
-            update(db,row,progress=10,result_json=json.dumps({"message":"META V5 — nested walk-forward initialisation"}))
+                update(db,row,progress=value,result_json=safe_dumps({"message":message}))
+            update(db,row,progress=10,result_json=safe_dumps({"message":"META V5 — nested walk-forward initialisation"}))
             result=run_meta_v5(params=p,progress=progress_v5)
             result["backtest_id"]=_persist_backtest(db,result)
             result["model_version_id"]=_persist_meta_v5_model(db,result)
-            update(db,row,progress=95,result_json=json.dumps({"message":"META V5 — persistance du modèle et du backtest"}))
+            update(db,row,progress=95,result_json=safe_dumps({"message":"META V5 — persistance du modèle et du backtest"}))
         elif row.kind=="V4_BACKTEST":
-            update(db,row,progress=20,result_json=json.dumps({"message":"META V4 — long-only, low-turnover, no historical news leakage"}))
+            update(db,row,progress=20,result_json=safe_dumps({"message":"META V4 — long-only, low-turnover, no historical news leakage"}))
             result=run_meta_v4(); result["backtest_id"]=_persist_backtest(db,result)
-            update(db,row,progress=90,result_json=json.dumps({"message":"Benchmark equal-weight et audit des coûts"}))
+            update(db,row,progress=90,result_json=safe_dumps({"message":"Benchmark equal-weight et audit des coûts"}))
         elif row.kind=="ADAPTIVE_BACKTEST":
-            update(db,row,progress=20,result_json=json.dumps({"message":"Adaptive META V3 — poids train-only"}))
+            update(db,row,progress=20,result_json=safe_dumps({"message":"Adaptive META V3 — poids train-only"}))
             result=run_adaptive_meta(p); result["backtest_id"]=_persist_backtest(db,result)
-            update(db,row,progress=90,result_json=json.dumps({"message":"Audit ledger et métriques"}))
+            update(db,row,progress=90,result_json=safe_dumps({"message":"Audit ledger et métriques"}))
         elif row.kind=="BASELINE":
-            update(db,row,progress=20,result_json=json.dumps({"message":"Baseline momentum 12-1"}))
+            update(db,row,progress=20,result_json=safe_dumps({"message":"Baseline momentum 12-1"}))
             result=run_momentum_baseline(p); result["backtest_id"]=_persist_backtest(db,result)
         elif row.kind=="SWEEP":
-            update(db,row,progress=10,result_json=json.dumps({"message":"Parameter sweep"}))
+            update(db,row,progress=10,result_json=safe_dumps({"message":"Parameter sweep"}))
             result=parameter_sweep(p.get("base",{}),p.get("grid",{}))
-            exp=ExperimentRun(name="Parameter Sweep",kind="SWEEP",status="COMPLETED",payload_json=json.dumps(result,default=str));db.add(exp);db.commit()
+            exp=ExperimentRun(name="Parameter Sweep",kind="SWEEP",status="COMPLETED",payload_json=safe_dumps(result,default=str));db.add(exp);db.commit()
             result={"experiment_id":exp.id,**result}
         elif row.kind=="ROBUSTNESS":
-            update(db,row,progress=10,result_json=json.dumps({"message":"Robustness suite"}))
+            update(db,row,progress=10,result_json=safe_dumps({"message":"Robustness suite"}))
             result=robustness(p)
-            exp=ExperimentRun(name="Robustness Suite",kind="ROBUSTNESS",status="COMPLETED",payload_json=json.dumps(result,default=str));db.add(exp);db.commit()
+            exp=ExperimentRun(name="Robustness Suite",kind="ROBUSTNESS",status="COMPLETED",payload_json=safe_dumps(result,default=str));db.add(exp);db.commit()
             result={"experiment_id":exp.id,**result}
         elif row.kind in ("RIDGE_BACKTEST","HGB_BACKTEST"):
             model="ridge" if row.kind=="RIDGE_BACKTEST" else "hgb"
-            update(db,row,progress=20,result_json=json.dumps({"message":"Backtest OOS "+model.upper()+" avec embargo 20 jours"}))
+            update(db,row,progress=20,result_json=safe_dumps({"message":"Backtest OOS "+model.upper()+" avec embargo 20 jours"}))
             result=run_model_oos_backtest(model,p); result["backtest_id"]=_persist_backtest(db,result)
-            update(db,row,progress=90,result_json=json.dumps({"message":"Audit ledger et métriques OOS"}))
+            update(db,row,progress=90,result_json=safe_dumps({"message":"Audit ledger et métriques OOS"}))
         elif row.kind in ("TRAIN_RIDGE","TRAIN_HGB"):
             model="ridge" if row.kind=="TRAIN_RIDGE" else "hgb"
-            update(db,row,progress=15,result_json=json.dumps({"message":"Walk-forward "+model.upper()}))
+            update(db,row,progress=15,result_json=safe_dumps({"message":"Walk-forward "+model.upper()}))
             result=train_walk_forward(model)
             last=db.query(ModelVersion).filter(ModelVersion.name==model.upper()).order_by(ModelVersion.version.desc()).first()
-            mv=ModelVersion(name=model.upper(),version=(last.version+1 if last else 1),model_type=model,metrics_json=json.dumps(result,default=str))
+            mv=ModelVersion(name=model.upper(),version=(last.version+1 if last else 1),model_type=model,metrics_json=safe_dumps(result,default=str))
             db.add(mv);db.commit();result={"model_version_id":mv.id,**result}
         elif row.kind=="FACTOR_SUMMARY":
-            update(db,row,progress=20,result_json=json.dumps({"message":"Calcul des IC cross-sectionnels"})); result=factor_summary();_save_state(db,"research.factor_summary",result)
+            update(db,row,progress=20,result_json=safe_dumps({"message":"Calcul des IC cross-sectionnels"})); result=factor_summary();_save_state(db,"research.factor_summary",result)
         elif row.kind=="VALIDATION":
             from app.services.validation import validation_report
-            update(db,row,progress=15,result_json=json.dumps({"message":"META V5 validation gate"})); result=validation_report(p);_save_state(db,"validation.latest",{"status":"COMPLETED",**result})
+            update(db,row,progress=15,result_json=safe_dumps({"message":"META V5 validation gate"})); result=validation_report(p);_save_state(db,"validation.latest",{"status":"COMPLETED",**result})
         elif row.kind=="DATA_REFRESH":
             from app.services.real_data import fetch_bars
-            update(db,row,progress=20,result_json=json.dumps({"message":"Téléchargement des barres Alpaca"}))
+            update(db,row,progress=20,result_json=safe_dumps({"message":"Téléchargement des barres Alpaca"}))
             df=fetch_bars(force=True); result={"rows":len(df),"symbols":int(df.symbol.nunique()),"from":str(df.date.min()),"to":str(df.date.max())}
         elif row.kind=="DAILY_PIPELINE":
             from app.services.daily_pipeline import run_daily_pipeline
             def progress(value,message):
-                update(db,row,progress=value,result_json=json.dumps({"message":message}))
+                update(db,row,progress=value,result_json=safe_dumps({"message":message}))
             result=run_daily_pipeline(db,force_market=bool(p.get("force_market")),refresh_sec=bool(p.get("refresh_sec")),progress=progress)
         elif row.kind=="PAPER_SNAPSHOT":
             from app.services.monitoring import snapshot_paper
@@ -213,13 +214,13 @@ def execute_job(key:str):
                     d=fundamental_events(s,force=True);events+=len(d);covered+=int(len(d)>0)
                 except Exception as exc:
                     failed.append({"symbol":s,"error":str(exc)})
-                if i%3==0:update(db,row,progress=min(90,10+int(80*(i+1)/max(1,len(syms)))),result_json=json.dumps({"message":f"SEC {i+1}/{len(syms)}"}))
+                if i%3==0:update(db,row,progress=min(90,10+int(80*(i+1)/max(1,len(syms)))),result_json=safe_dumps({"message":f"SEC {i+1}/{len(syms)}"}))
             diag=sec_diagnostics()
             result={"symbols":len(syms),"covered":covered,"events":events,"not_found":diag.get("not_found_count",0),"errors":len(failed)+diag.get("error_count",0),"failed":failed[:20],"policy":"best_effort"}
         else: raise ValueError(f"Unknown job kind {row.kind}")
-        update(db,row,status="COMPLETED",progress=100,result_json=json.dumps(result,default=str),completed_at=datetime.utcnow())
+        update(db,row,status="COMPLETED",progress=100,result_json=safe_dumps(result,default=str),completed_at=datetime.utcnow())
     except Exception as e:
-        update(db,row,status="FAILED",error=str(e),result_json=json.dumps({"message":"Échec","traceback":traceback.format_exc()}),completed_at=datetime.utcnow())
+        update(db,row,status="FAILED",error=str(e),result_json=safe_dumps({"message":"Échec","traceback":traceback.format_exc()}),completed_at=datetime.utcnow())
     finally: db.close()
 
 def _heartbeat_loop():
