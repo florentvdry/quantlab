@@ -285,3 +285,65 @@ def test_alpaca_history_defaults_to_2016(monkeypatch):
     from app.services import real_data
     monkeypatch.setattr(real_data.settings,"real_history_start","2016-01-01")
     assert real_data._requested_history_start()=="2016-01-01"
+
+
+def test_meta_v6_target_matches_next_open_holding_period(monkeypatch):
+    from app.services import meta_v6
+    monkeypatch.setitem(meta_v6.V6_CONFIG,"holding_days",10)
+    dates=pd.bdate_range("2026-01-02",periods=20)
+    panel=pd.DataFrame({
+        "date":dates,
+        "symbol":["A"]*len(dates),
+        "open":np.arange(100,120,dtype=float),
+    })
+    out=meta_v6._add_execution_aligned_targets(panel)
+    first=out.iloc[0]
+    expected=111.0/101.0-1.0
+    assert abs(first["v6_future_open_return"]-expected)<1e-12
+
+
+def test_meta_v6_continuous_builder_uses_execution_aligned_labels(monkeypatch):
+    from app.services import meta_v6
+    from app.services.features import FEATURES
+
+    dates=pd.bdate_range("2024-01-02",periods=280)
+    symbols=[f"V{i:02d}" for i in range(16)]
+    rows=[]
+    for si,symbol in enumerate(symbols):
+        quality=(len(symbols)-si)/len(symbols)
+        price=100.0+si
+        prices=[]
+        for i,_ in enumerate(dates):
+            daily_ret=(quality-.5)*.0015+np.sin((i+si)/8.0)*.004
+            price*=1+daily_ret
+            prices.append(price)
+        for i,d in enumerate(dates):
+            row={
+                "date":d,"symbol":symbol,"sector":"Test",
+                "open":prices[i],"close":prices[i]*(1+0.0002*np.cos(i)),
+                "ret_20d":(quality-.5)*.06+np.sin((i+si)/10.0)*.02,
+                "vol_20d":.15+(si%4)*.02,
+                "trend_200":(quality-.5)*.08,
+                "future_relative_20d":0.0,
+            }
+            for fi,name in enumerate(FEATURES):
+                row[name]=max(.001,min(.999,quality+(fi%3-1)*.015))
+            rows.append(row)
+
+    panel=pd.DataFrame(rows)
+    monkeypatch.setitem(meta_v6.V6_CONFIG,"min_train_days",80)
+    monkeypatch.setitem(meta_v6.V6_CONFIG,"validation_days",40)
+    monkeypatch.setitem(meta_v6.V6_CONFIG,"model_refresh_days",50)
+    monkeypatch.setitem(meta_v6.V6_CONFIG,"lgbm_members",1)
+    monkeypatch.setitem(meta_v6.V6_CONFIG,"meta_threshold_grid",[0.50,0.60])
+    monkeypatch.setitem(meta_v6.V6_CONFIG,"long_count_grid",[5,8])
+
+    scored,summary=meta_v6.build_meta_v6_oos(panel=panel)
+    assert summary["simulation"]["method"]=="CONTINUOUS_EXPANDING_WALK_FORWARD_EXECUTION_ALIGNED"
+    assert "next-open" in summary["target"]["alpha"]
+    assert summary["target"]["round_trip_cost_bps"]==22.0
+    assert scored["v6_meta_probability"].notna().any()
+    assert scored["v6_trade_score"].notna().any()
+    refresh=summary["refreshes"][0]
+    assert refresh["meta"]["selected_long_count"] in (5,8)
+    assert refresh["meta"]["selected_threshold"] in (0.50,0.60)
