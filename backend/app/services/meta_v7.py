@@ -50,7 +50,7 @@ def _daily_return_matrix(frame: pd.DataFrame) -> pd.DataFrame:
     return x.pivot(index="date", columns="symbol", values="ret_1d").sort_index()
 
 
-def _market_risk_scale(frame: pd.DataFrame) -> pd.Series:
+def _market_risk_scale(frame: pd.DataFrame, floor: float | None = None) -> pd.Series:
     returns = _daily_return_matrix(frame)
     market_ret = returns.mean(axis=1, skipna=True)
     lookback = int(V7_CONFIG["market_vol_lookback_days"])
@@ -58,8 +58,9 @@ def _market_risk_scale(frame: pd.DataFrame) -> pd.Series:
     ref = market_vol.expanding(
         min_periods=int(V7_CONFIG["market_vol_reference_min_days"])
     ).median().shift(1)
+    risk_floor=float(V7_CONFIG["market_risk_floor"] if floor is None else floor)
     scale = (ref / market_vol.replace(0, np.nan)).clip(
-        lower=float(V7_CONFIG["market_risk_floor"]),
+        lower=risk_floor,
         upper=1.0,
     )
     return scale.fillna(1.0)
@@ -127,6 +128,7 @@ def apply_v7_risk_overlay(
     *,
     corr_cap: float | None = None,
     max_names: int | None = None,
+    market_risk_floor: float | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     out = scored.copy().sort_values(["date", "symbol"])
     all_dates = np.array(sorted(out["date"].unique()))
@@ -147,7 +149,8 @@ def apply_v7_risk_overlay(
     out["v7_threshold"] = np.nan
 
     returns = _daily_return_matrix(out)
-    market_scale = _market_risk_scale(out)
+    risk_floor=float(V7_CONFIG["market_risk_floor"] if market_risk_floor is None else market_risk_floor)
+    market_scale = _market_risk_scale(out,floor=risk_floor)
     thresholds = _refresh_thresholds(research)
     selected_counts = []
     gross_scale_estimates = []
@@ -233,7 +236,7 @@ def apply_v7_risk_overlay(
         "max_names": max_names,
         "min_names": min_names,
         "market_vol_lookback_days": int(V7_CONFIG["market_vol_lookback_days"]),
-        "market_risk_floor": float(V7_CONFIG["market_risk_floor"]),
+        "market_risk_floor": risk_floor,
         "single_name_weight_cap": float(V7_CONFIG["single_name_weight_cap"]),
         "mean_selected_names": round(float(np.mean(selected_counts)), 3) if selected_counts else None,
         "mean_position_scale": round(float(np.mean(gross_scale_estimates)), 4) if gross_scale_estimates else None,
@@ -311,18 +314,22 @@ def meta_v7_validation_bundle(panel: pd.DataFrame | None = None, progress=None) 
         progress(8, "META V7 — construction V6 OOS")
     v6_scored, v6_research = build_meta_v6_oos(panel=source, progress=progress)
 
+    base_floor=float(V7_CONFIG["market_risk_floor"])
     overlays = [
-        ("base", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"])),
-        ("corr_075", 0.75, int(V7_CONFIG["max_names"])),
-        ("corr_090", 0.90, int(V7_CONFIG["max_names"])),
-        ("max_10", float(V7_CONFIG["corr_cap"]), 10),
-        ("max_15", float(V7_CONFIG["corr_cap"]), 15),
+        ("base", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"]), base_floor),
+        ("risk_floor_035", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"]), 0.35),
+        ("risk_floor_055", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"]), 0.55),
+        ("risk_floor_065", float(V7_CONFIG["corr_cap"]), int(V7_CONFIG["max_names"]), 0.65),
+        ("corr_075", 0.75, int(V7_CONFIG["max_names"]), base_floor),
+        ("corr_090", 0.90, int(V7_CONFIG["max_names"]), base_floor),
+        ("max_10", float(V7_CONFIG["corr_cap"]), 10, base_floor),
+        ("max_15", float(V7_CONFIG["corr_cap"]), 15, base_floor),
     ]
 
     rows = []
     base_result = None
     base_research = None
-    for i, (name, cap, names) in enumerate(overlays):
+    for i, (name, cap, names, risk_floor) in enumerate(overlays):
         if progress:
             progress(76 + int(15 * i / len(overlays)), f"META V7 risk stress: {name}")
         scored, overlay = apply_v7_risk_overlay(
@@ -330,6 +337,7 @@ def meta_v7_validation_bundle(panel: pd.DataFrame | None = None, progress=None) 
             v6_research,
             corr_cap=cap,
             max_names=names,
+            market_risk_floor=risk_floor,
         )
         result = run_backtest(
             V7_PORTFOLIO | {"long_count": names},
