@@ -17,6 +17,8 @@ PAPER_THRESHOLDS = {
     "robust_min_sharpe": 0.0,
     "min_acceptance_rate": 0.10,
     "max_acceptance_rate": 0.80,
+    "min_live_like_coverage": 0.65,
+    "min_median_eligible_symbols": 25,
 }
 
 
@@ -61,6 +63,21 @@ def validation_report(params=None, progress=None, panel=None, bundle=None):
             "name": "historical_news_no_leakage",
             "ok": candidate.get("dataset", {}).get("historical_news") == "neutral_no_point_in_time_history",
             "detail": candidate.get("dataset", {}).get("historical_news"),
+        },
+        {
+            "name": "live_like_coverage_at_least_65pct",
+            "ok": (research.get("simulation", {}).get("coverage_ratio") or 0.0) >= PAPER_THRESHOLDS["min_live_like_coverage"],
+            "detail": research.get("simulation", {}),
+        },
+        {
+            "name": "eligible_universe_breadth",
+            "ok": (candidate.get("dataset", {}).get("solid_eligible_symbols_median") or 0) >= PAPER_THRESHOLDS["min_median_eligible_symbols"],
+            "detail": {
+                "median": candidate.get("dataset", {}).get("solid_eligible_symbols_median"),
+                "p10": candidate.get("dataset", {}).get("solid_eligible_symbols_p10"),
+                "latest": candidate.get("dataset", {}).get("solid_eligible_symbols_latest"),
+                "eligible_from": candidate.get("dataset", {}).get("solid_eligible_from"),
+            },
         },
         {
             "name": "sharpe_at_least_0_75",
@@ -128,8 +145,8 @@ def validation_report(params=None, progress=None, panel=None, bundle=None):
         },
     ]
 
-    core = checks[:5]
-    quality = checks[5:]
+    core = checks[:7]
+    quality = checks[7:]
     passed = all(c["ok"] for c in checks)
     quality_passes = sum(1 for c in quality if c["ok"])
     if passed:
