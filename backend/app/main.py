@@ -228,6 +228,8 @@ def job_bootstrap(force_market:bool=True,refresh_sec:bool=False):return enqueue(
 def job_backtest(req:BacktestRequest):return enqueue("BACKTEST",req.model_dump())
 @app.post("/api/jobs/meta-v5")
 def job_meta_v5():return enqueue("META_V5",{})
+@app.post("/api/jobs/meta-v6")
+def job_meta_v6():return enqueue("META_V6",{})
 @app.post("/api/jobs/meta-v5-signals")
 def job_meta_v5_signals():return enqueue("META_V5_SIGNALS",{})
 @app.post("/api/jobs/v4-backtest")
