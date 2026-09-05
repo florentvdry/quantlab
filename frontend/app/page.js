@@ -85,8 +85,7 @@ export default function Home(){
 
   const runV5=async()=>{
     try{
-      const payload={long_count:15,short_count:0,rebalance_days:10,commission_bps:6,slippage_bps:5,gross_exposure:1,initial_capital:100000,adaptive_lookback_days:252}
-      await api('/api/jobs/meta-v5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+      await api('/api/jobs/meta-v5',{method:'POST'})
       await loadSnapshot(false)
     }catch(e){
       setError(e.message)
