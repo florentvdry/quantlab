@@ -41,13 +41,19 @@ class ExecutionService:
         promoted=self.db.query(StrategyVersion).filter(StrategyVersion.status=="PAPER").first()
         checks.append({"name":"strategy_promoted","ok":promoted is not None,"detail":None if not promoted else f"{promoted.name} v{promoted.version}"})
         if self.broker.alpaca_enabled():
+            account=self.broker.sync_account()
+            checks.append({"name":"account_active","ok":not account.get("account_blocked") and not account.get("trading_blocked"),"detail":{"status":account.get("status"),"account_blocked":account.get("account_blocked"),"trading_blocked":account.get("trading_blocked")}})
+            needs_short=any(float(t["weight"])<0 for t in targets)
+            checks.append({"name":"shorting_enabled","ok":not needs_short or bool(account.get("shorting_enabled")),"detail":account.get("shorting_enabled")})
             assets=self._assets();bad=[t["symbol"] for t in targets if not assets.get(t["symbol"],{}).get("tradable")]
             nonshort=[t["symbol"] for t in targets if t["weight"]<0 and not assets.get(t["symbol"],{}).get("shortable")]
+            hard_to_borrow=[t["symbol"] for t in targets if t["weight"]<0 and str(assets.get(t["symbol"],{}).get("borrow_status","")).lower()=="hard_to_borrow"]
             checks.append({"name":"assets_tradable","ok":not bad,"detail":bad[:20]})
             checks.append({"name":"shortable","ok":not nonshort,"detail":nonshort[:20]})
+            checks.append({"name":"borrow_status","ok":not hard_to_borrow,"detail":{"blocked_hard_to_borrow":hard_to_borrow[:20],"policy":"V1 blocks HTB because locate workflow is not implemented"}})
             oo=self._open_orders();checks.append({"name":"no_conflicting_open_orders","ok":len(oo)==0,"detail":len(oo)})
-            account=self.broker.sync_account();required=sum(max(0,float(t["weight"])) for t in targets)*float(account["equity"])
-            checks.append({"name":"buying_power","ok":float(account["buying_power"])>=required,"detail":{"available":account["buying_power"],"estimated_required":round(required,2)}})
+            required=gross*float(account["equity"])
+            checks.append({"name":"buying_power","ok":float(account["buying_power"])>=required,"detail":{"available":account["buying_power"],"conservative_required":round(required,2)}})
         if require_open and self.broker.alpaca_enabled():
             c=self.clock();checks.append({"name":"market_open","ok":bool(c.get("is_open")),"detail":c})
         return {"passed":all(x["ok"] for x in checks),"checks":checks}
