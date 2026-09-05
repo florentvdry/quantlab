@@ -8,7 +8,7 @@ from app.models.entities import JobRun, ExperimentRun, ModelVersion, BacktestRun
 from app.services.backtest import run_backtest, run_momentum_baseline, run_adaptive_meta, run_meta_v4
 from app.services.experiments import parameter_sweep, robustness
 from app.services.research import train_walk_forward, factor_summary, run_model_oos_backtest
-from app.services.meta_v5 import run_meta_v5, latest_meta_v5_signals
+from app.services.meta_v5 import run_meta_v5, latest_meta_v5_signals, meta_v5_validation_bundle
 
 QUEUE="quantlab:jobs"
 WORKER_HEARTBEAT="quantlab:worker:heartbeat"
@@ -54,6 +54,23 @@ def update(db,row,**kw):
     for k,v in kw.items(): setattr(row,k,v)
     row.updated_at=datetime.utcnow(); db.commit()
 
+def _save_state(db,key,value):
+    row=db.query(SystemState).filter(SystemState.key==key).first()
+    if not row:
+        row=SystemState(key=key,value_json="{}");db.add(row)
+    row.value_json=json.dumps(value,default=str);row.updated_at=datetime.utcnow();db.commit()
+    return row
+
+def _persist_meta_v5_model(db,result):
+    last=db.query(ModelVersion).filter(ModelVersion.name=="META_V5").order_by(ModelVersion.version.desc()).first()
+    mv=ModelVersion(
+        name="META_V5",version=(last.version+1 if last else 1),model_type="meta_ensemble",
+        metrics_json=json.dumps(result.get("meta_v5",{}),default=str),
+        config_json=json.dumps({"portfolio":result.get("params",{}),"architecture":result.get("meta_v5",{}).get("architecture",{})},default=str)
+    )
+    db.add(mv);db.commit();db.refresh(mv)
+    return mv.id
+
 def _persist_backtest(db,result):
     m=result["metrics"]
     row=BacktestRun(strategy_name=result["strategy"],cagr=m["cagr"],sharpe=m["sharpe"],max_drawdown=m["max_drawdown"],
@@ -68,7 +85,50 @@ def execute_job(key:str):
         update(db,row,status="RUNNING",progress=5,started_at=datetime.utcnow(),result_json=json.dumps({"message":"Initialisation"}))
         p=json.loads(row.payload_json or "{}")
         _ensure_research_data(db,row)
-        if row.kind=="BACKTEST":
+        if row.kind=="AUTO_BOOTSTRAP":
+            from app.services.daily_pipeline import run_daily_pipeline
+            from app.services.features import build_feature_panel
+            from app.services.validation import validation_report
+            update(db,row,progress=6,result_json=json.dumps({"message":"Autopilot — préparation des données"}))
+            def pipeline_progress(value,message):
+                mapped=6+int(min(100,max(0,float(value)))*0.24)
+                update(db,row,progress=min(30,mapped),result_json=json.dumps({"message":"Autopilot / Data — "+str(message)}))
+            pipeline=run_daily_pipeline(
+                db,
+                force_market=bool(p.get("force_market",False)),
+                refresh_sec=bool(p.get("refresh_sec",False)),
+                progress=pipeline_progress,
+            )
+            panel=build_feature_panel()
+            update(db,row,progress=32,result_json=json.dumps({"message":"Autopilot — Factor Research"}))
+            factors=factor_summary(panel);_save_state(db,"research.factor_summary",factors)
+
+            def v5_progress(value,message):
+                mapped=36+int(min(100,max(0,float(value)))*0.38)
+                update(db,row,progress=min(76,mapped),result_json=json.dumps({"message":"Autopilot / META V5 — "+str(message)}))
+            bundle=meta_v5_validation_bundle(panel=panel,progress=v5_progress)
+            candidate=bundle["backtest"]
+            candidate["backtest_id"]=_persist_backtest(db,candidate)
+            candidate["model_version_id"]=_persist_meta_v5_model(db,candidate)
+            update(db,row,progress=78,result_json=json.dumps({"message":"Autopilot — Validation Gate"}))
+            validation=validation_report(p, panel=panel, bundle=bundle)
+            _save_state(db,"validation.latest",{"status":"COMPLETED",**validation})
+
+            def signal_progress(value,message):
+                mapped=86+int(min(100,max(0,float(value)))*0.10)
+                update(db,row,progress=min(96,mapped),result_json=json.dumps({"message":"Autopilot / Signals — "+str(message)}))
+            signals=latest_meta_v5_signals(panel=panel,progress=signal_progress)
+            _save_state(db,"meta_v5.latest_signals",signals)
+            result={
+                "mode":"AUTO",
+                "pipeline":pipeline,
+                "factor_research":factors,
+                "backtest_id":candidate["backtest_id"],
+                "model_version_id":candidate["model_version_id"],
+                "validation":{"tier":validation.get("tier"),"passed":validation.get("passed"),"paper_eligible":validation.get("paper_eligible")},
+                "signals":{"market_date":signals.get("market_date"),"accepted_count":signals.get("accepted_count"),"paper_execution":signals.get("paper_execution")},
+            }
+        elif row.kind=="BACKTEST":
             update(db,row,progress=20,result_json=json.dumps({"message":"Construction des features et du portefeuille"}))
             result=run_backtest(p); result["backtest_id"]=_persist_backtest(db,result)
             update(db,row,progress=90,result_json=json.dumps({"message":"Calcul des métriques"}))
@@ -87,14 +147,7 @@ def execute_job(key:str):
             update(db,row,progress=10,result_json=json.dumps({"message":"META V5 — nested walk-forward initialisation"}))
             result=run_meta_v5(params=p,progress=progress_v5)
             result["backtest_id"]=_persist_backtest(db,result)
-            last=db.query(ModelVersion).filter(ModelVersion.name=="META_V5").order_by(ModelVersion.version.desc()).first()
-            mv=ModelVersion(
-                name="META_V5",version=(last.version+1 if last else 1),model_type="meta_ensemble",
-                metrics_json=json.dumps(result.get("meta_v5",{}),default=str),
-                config_json=json.dumps({"portfolio":result.get("params",{}),"architecture":result.get("meta_v5",{}).get("architecture",{})},default=str)
-            )
-            db.add(mv);db.commit();db.refresh(mv)
-            result["model_version_id"]=mv.id
+            result["model_version_id"]=_persist_meta_v5_model(db,result)
             update(db,row,progress=95,result_json=json.dumps({"message":"META V5 — persistance du modèle et du backtest"}))
         elif row.kind=="V4_BACKTEST":
             update(db,row,progress=20,result_json=json.dumps({"message":"META V4 — long-only, low-turnover, no historical news leakage"}))
@@ -130,10 +183,10 @@ def execute_job(key:str):
             mv=ModelVersion(name=model.upper(),version=(last.version+1 if last else 1),model_type=model,metrics_json=json.dumps(result,default=str))
             db.add(mv);db.commit();result={"model_version_id":mv.id,**result}
         elif row.kind=="FACTOR_SUMMARY":
-            update(db,row,progress=20,result_json=json.dumps({"message":"Calcul des IC cross-sectionnels"})); result=factor_summary()
+            update(db,row,progress=20,result_json=json.dumps({"message":"Calcul des IC cross-sectionnels"})); result=factor_summary();_save_state(db,"research.factor_summary",result)
         elif row.kind=="VALIDATION":
             from app.services.validation import validation_report
-            update(db,row,progress=15,result_json=json.dumps({"message":"META V5 validation gate"})); result=validation_report(p)
+            update(db,row,progress=15,result_json=json.dumps({"message":"META V5 validation gate"})); result=validation_report(p);_save_state(db,"validation.latest",{"status":"COMPLETED",**result})
         elif row.kind=="DATA_REFRESH":
             from app.services.real_data import fetch_bars
             update(db,row,progress=20,result_json=json.dumps({"message":"Téléchargement des barres Alpaca"}))
@@ -148,12 +201,16 @@ def execute_job(key:str):
             result=snapshot_paper(db)
         elif row.kind=="SEC_REFRESH":
             from app.services.real_data import universe
-            from app.services.sec_fundamentals import fundamental_events
-            syms=universe();covered=events=0
+            from app.services.sec_fundamentals import fundamental_events,diagnostics as sec_diagnostics
+            syms=universe();covered=events=0;failed=[]
             for i,s in enumerate(syms):
-                d=fundamental_events(s,force=True);events+=len(d);covered+=int(len(d)>0)
+                try:
+                    d=fundamental_events(s,force=True);events+=len(d);covered+=int(len(d)>0)
+                except Exception as exc:
+                    failed.append({"symbol":s,"error":str(exc)})
                 if i%3==0:update(db,row,progress=min(90,10+int(80*(i+1)/max(1,len(syms)))),result_json=json.dumps({"message":f"SEC {i+1}/{len(syms)}"}))
-            result={"symbols":len(syms),"covered":covered,"events":events}
+            diag=sec_diagnostics()
+            result={"symbols":len(syms),"covered":covered,"events":events,"not_found":diag.get("not_found_count",0),"errors":len(failed)+diag.get("error_count",0),"failed":failed[:20],"policy":"best_effort"}
         else: raise ValueError(f"Unknown job kind {row.kind}")
         update(db,row,status="COMPLETED",progress=100,result_json=json.dumps(result,default=str),completed_at=datetime.utcnow())
     except Exception as e:
