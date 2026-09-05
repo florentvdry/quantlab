@@ -20,10 +20,10 @@ PAPER_THRESHOLDS = {
 }
 
 
-def validation_report(params=None, progress=None):
-    panel = build_feature_panel()
+def validation_report(params=None, progress=None, panel=None, bundle=None):
+    panel = build_feature_panel() if panel is None else panel
     dq = data_quality_report()
-    bundle = meta_v5_validation_bundle(panel=panel, progress=progress)
+    bundle = meta_v5_validation_bundle(panel=panel, progress=progress) if bundle is None else bundle
     candidate = bundle["backtest"]
     research = bundle["research"]
     robust = bundle["robustness"]
