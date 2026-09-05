@@ -22,8 +22,8 @@ def paper_history(db,limit=500):
     rows=db.query(PortfolioSnapshot).filter(PortfolioSnapshot.source=="PAPER").order_by(PortfolioSnapshot.id.desc()).limit(limit).all()
     return [serialize_snapshot(r) for r in reversed(rows)]
 
-def compare_paper_backtest(db):
-    snaps=paper_history(db,10000);last_bt=db.query(BacktestRun).order_by(BacktestRun.id.desc()).first()
+def compare_paper_backtest(db,limit=1000):
+    snaps=paper_history(db,limit);last_bt=db.query(BacktestRun).order_by(BacktestRun.id.desc()).first()
     paper_return=None
     if len(snaps)>=2 and snaps[0]["equity"]:paper_return=snaps[-1]["equity"]/snaps[0]["equity"]-1
     bt_return=None;bt_cagr=None;bt_sharpe=None;aligned=False
