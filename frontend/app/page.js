@@ -69,7 +69,13 @@ export default function Home(){
   },[selectedBacktest])
 
   const activeJob=useMemo(()=>snapshot?.jobs?.find(j=>j.status==='RUNNING'||j.status==='QUEUED'),[snapshot])
-  const candidateRunning=Boolean(snapshot?.jobs?.find(j=>j.kind==='META_V7'&&(j.status==='RUNNING'||j.status==='QUEUED')))
+  const candidateJob=useMemo(()=>snapshot?.jobs?.find(j=>j.kind==='META_V7'),[snapshot])
+  const candidateRunning=Boolean(candidateJob&&(candidateJob.status==='RUNNING'||candidateJob.status==='QUEUED'))
+
+  useEffect(()=>{
+    if(!candidateJob?.backtest_id)return
+    setSelectedBacktest(current=>current===candidateJob.backtest_id?current:candidateJob.backtest_id)
+  },[candidateJob?.backtest_id])
 
   const refreshAll=async()=>{
     setRefreshing(true)
