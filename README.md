@@ -69,16 +69,17 @@ docker compose up --build --force-recreate
 
 Les credentials doivent être ceux d'**Alpaca Paper**. Ne publie jamais tes clés dans Git ou dans un ticket.
 
-## Workflow recommandé
+## Autopilot / workflow recommandé
 
-1. **Overview** — vérifier Setup / Readiness.
-2. **Data** — lancer `Daily Pipeline`, vérifier Market Data, SEC et Data Quality.
-3. **Research** — inspecter Rank IC, IC IR, ratio d'IC positifs et spread Top-Bottom.
-4. **Models** — lancer META Ensemble V5 et comparer Ridge / HGB.
-5. **Backtests** — comparer META V5, V4, META V2 et Momentum.
-6. **Validation** — lancer le Validation Gate complet ; le candidat est META V5.
-7. **Signals** — générer le snapshot META V5 TRADE / SKIP puis inspecter les probabilités et tailles.
-8. **Paper** — seulement après validation/promotion ; commencer par Preview / Risk Gate.
+Avec `AUTO_BOOTSTRAP_ENABLED=true` (défaut), aucun bouton n'est requis pour initialiser QuantLab. Au démarrage, le scheduler lance automatiquement si nécessaire :
+
+`Market Data -> SEC best-effort -> Feature Store -> Factor Research -> META V5 -> Validation -> Signals`.
+
+Le refresh quotidien utilise le même pipeline complet. Les boutons restent disponibles uniquement pour relancer ou comparer des expériences manuellement.
+
+1. **Overview** — suivre l'Autopilot et la progression du job.
+2. **Research / Models / Backtests / Validation / Signals** — consulter les résultats chargés automatiquement.
+3. **Paper** — seulement après validation/promotion ; commencer par Preview / Risk Gate.
 
 ## Anti-lookahead
 
@@ -206,7 +207,9 @@ Le flatten exige une confirmation explicite et reste limité à PAPER en V1.
 Le scheduler conserve ses états dans PostgreSQL afin qu'un redémarrage Docker ne répète pas automatiquement une tâche déjà exécutée.
 
 - Daily Pipeline après clôture US ;
-- SEC refresh selon le jour configuré ;
+- Autopilot complet au premier démarrage si les artefacts de recherche manquent ;
+- refresh complet quotidien après clôture US ;
+- SEC refresh best-effort selon le jour configuré : un ticker sans `companyfacts` ne bloque jamais le pipeline ;
 - snapshots Paper ;
 - réconciliation périodique des ordres ;
 - rebalance Paper automatique uniquement si `PAPER_AUTO_ENABLED=true` **et** que le Risk Gate passe.
@@ -243,6 +246,7 @@ Cela doit notamment empêcher qu'une erreur JSX comme une accolade manquante soi
 - `GET /health`
 - `GET /ready`
 - `GET /api/setup`
+- `POST /api/jobs/bootstrap`
 - `POST /api/jobs/daily-pipeline`
 - `GET /api/data/quality`
 - `GET /api/research/factors`
