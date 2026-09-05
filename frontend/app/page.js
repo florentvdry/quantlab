@@ -8,7 +8,7 @@ const num=(v,d=3)=>v==null?'—':Number(v).toFixed(d)
 const JOB_LABELS={
   BACKTEST:'META V2 Backtest',ADAPTIVE_BACKTEST:'Adaptive META V3',BASELINE:'Baseline momentum',SWEEP:'Parameter sweep',ROBUSTNESS:'Robustness',
   TRAIN_RIDGE:'Walk-forward Ridge',TRAIN_HGB:'Walk-forward HGB',FACTOR_SUMMARY:'Factor Research',
-  VALIDATION:'Validation Gate',DATA_REFRESH:'Market data',SEC_REFRESH:'SEC',DAILY_PIPELINE:'Daily Pipeline',
+  VALIDATION:'Validation Gate',RIDGE_BACKTEST:'Ridge OOS Backtest',HGB_BACKTEST:'HGB OOS Backtest',DATA_REFRESH:'Market data',SEC_REFRESH:'SEC',DAILY_PIPELINE:'Daily Pipeline',
   PAPER_SNAPSHOT:'Paper Snapshot'
 }
 const STATUS_LABELS={QUEUED:'En attente',RUNNING:'En cours',COMPLETED:'Terminé',FAILED:'Échec'}
@@ -176,7 +176,7 @@ export default function Home(){
 
     {tab==='Models'&&<>
       <div className="two">
-        <Card title="Train / Walk-forward"><div className="actionGrid"><button className="btn" onClick={()=>postJob('/api/jobs/train/ridge','Walk-forward Ridge',{})}>Train Ridge</button><button className="btn2" onClick={()=>postJob('/api/jobs/train/hgb','Walk-forward HGB',{})}>Train HGB</button></div></Card>
+        <Card title="Train / Walk-forward"><div className="actionGrid"><button className="btn" onClick={()=>postJob('/api/jobs/train/ridge','Walk-forward Ridge',{})}>Train Ridge</button><button className="btn2" onClick={()=>postJob('/api/jobs/train/hgb','Walk-forward HGB',{})}>Train HGB</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/ridge','Ridge OOS Backtest')}>Backtest Ridge OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/hgb','HGB OOS Backtest')}>Backtest HGB OOS</button></div></Card>
         <Card title="Model Registry">{!models.length?<Empty>Aucun modèle entraîné.</Empty>:<table><thead><tr><th>Model</th><th>Version</th><th>Status</th><th>OOS IC</th></tr></thead><tbody>{models.map(m=><tr key={m.id}><td>{m.name}</td><td>v{m.version}</td><td>{m.status}</td><td>{num(m.metrics?.oos_mean_rank_ic??m.metrics?.test_mean_rank_ic,4)}</td></tr>)}</tbody></table>}</Card>
       </div>
     </>}
@@ -184,7 +184,7 @@ export default function Home(){
     {tab==='Backtests'&&<>
       <Card title="Strategy Builder">
         <div className="formGrid">{Object.entries(cfg).map(([k,v])=><label key={k}><span>{k}</span><input type="number" step="any" value={v} onChange={e=>setCfg({...cfg,[k]:Number(e.target.value)})}/></label>)}</div>
-        <div className="row topGap"><button className="btn" onClick={()=>postJob('/api/jobs/adaptive-backtest','Adaptive META V3')}>Queue Adaptive V3</button><button className="btn2" onClick={()=>postJob('/api/jobs/backtest','META V2')}>Queue META V2</button><button className="btn2" onClick={()=>postJob('/api/jobs/baseline','Momentum baseline')}>Queue Baseline</button><button className="btn2" onClick={()=>postJob('/api/jobs/robustness','Robustness')}>Robustness V2</button><button className="btn2" onClick={()=>postJob('/api/jobs/sweep','Parameter Sweep',{base:cfg,grid:{long_count:[10,20,30],short_count:[10,20,30],rebalance_days:[5,10,21]}})}>Parameter Sweep</button></div>
+        <div className="row topGap"><button className="btn" onClick={()=>postJob('/api/jobs/adaptive-backtest','Adaptive META V3')}>Queue Adaptive V3</button><button className="btn2" onClick={()=>postJob('/api/jobs/backtest','META V2')}>Queue META V2</button><button className="btn2" onClick={()=>postJob('/api/jobs/baseline','Momentum baseline')}>Queue Baseline</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/ridge','Ridge OOS Backtest')}>Ridge OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/hgb','HGB OOS Backtest')}>HGB OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/robustness','Robustness')}>Robustness V2</button><button className="btn2" onClick={()=>postJob('/api/jobs/sweep','Parameter Sweep',{base:cfg,grid:{long_count:[10,20,30],short_count:[10,20,30],rebalance_days:[5,10,21]}})}>Parameter Sweep</button></div>
       </Card>
       {selectedBacktest&&<Card title={selectedBacktest.strategy} className="section">
         <div className="metricRow">
