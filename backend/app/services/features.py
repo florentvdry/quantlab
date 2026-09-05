@@ -5,7 +5,7 @@ import pandas as pd
 from app.core.config import settings
 from app.services.data import synthetic_panel
 
-FEATURE_SCHEMA_VERSION="2"
+FEATURE_SCHEMA_VERSION="3"
 FEATURES=["momentum_12_1_rank","ret_60d_rank","ret_20d_rank","trend_50_rank","trend_200_rank","fundamental_raw_rank","earnings_raw_rank","news_raw_rank","low_vol_rank","liquidity_rank"]
 STORE_DIR=os.getenv("QUANTLAB_DATA_DIR","/data");STORE_PATH=f"{STORE_DIR}/feature_store.parquet";META_PATH=f"{STORE_DIR}/feature_store.json"
 _PANEL_CACHE=None;_PANEL_CACHE_AT=0.0
@@ -26,7 +26,12 @@ def _technical(df):
 def _source_panel():
     if settings.data_mode.lower()=="alpaca":
         from app.services.real_data import fetch_bars,news_scores
-        df=fetch_bars().copy();df["sector"]="US Equity";ns=news_scores();df["news_raw"]=df["symbol"].map(ns).fillna(0.0)
+        df=fetch_bars().copy();df["sector"]="US Equity";ns=news_scores();df["news_raw"]=0.0
+        # The provider endpoint only gives a recent news window. Never smear today's
+        # news score across historical dates: that would leak future information.
+        latest_date=df["date"].max()
+        mask=df["date"].eq(latest_date)
+        df.loc[mask,"news_raw"]=df.loc[mask,"symbol"].map(ns).fillna(0.0)
         from app.services.sec_fundamentals import point_in_time_panel
         pit=point_in_time_panel(sorted(df.symbol.unique()),sorted(df.date.unique()))
         if not pit.empty:df=df.merge(pit[["date","symbol","fundamental_raw","earnings_raw"]],on=["date","symbol"],how="left")
@@ -83,5 +88,6 @@ def build_feature_panel(force=False):
 def panel_metadata(df=None):
     df=build_feature_panel() if df is None else df
     payload={"mode":settings.data_mode.lower(),"feed":settings.alpaca_feed if settings.data_mode.lower()=="alpaca" else "synthetic","schema":FEATURE_SCHEMA_VERSION,
-             "rows":int(len(df)),"symbols":int(df.symbol.nunique()),"from":str(pd.Timestamp(df.date.min()).date()),"to":str(pd.Timestamp(df.date.max()).date())}
+             "rows":int(len(df)),"symbols":int(df.symbol.nunique()),"from":str(pd.Timestamp(df.date.min()).date()),"to":str(pd.Timestamp(df.date.max()).date()),
+             "historical_news":"neutral_no_point_in_time_history"}
     raw=json.dumps(payload,sort_keys=True).encode();payload["fingerprint"]=hashlib.sha256(raw).hexdigest()[:16];return payload
