@@ -4,6 +4,7 @@ import { RefreshCcw } from 'lucide-react'
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Badge, Empty, Panel, PanelHeader, SectionHeading, TableWrap, cn, tdClass, thClass, tableClass } from './ui'
 import { Button } from './shell'
+import { BacktestAnalytics } from './backtest-analytics'
 import { money, num, pct, price, safeArray, shortDate } from '../lib/format'
 
 
@@ -75,7 +76,7 @@ function AccountCurve({detail}){
   </div>
 }
 
-function BacktestDetail({detail}){
+function BacktestDetail({detail,registry,fetchBacktest}){
   if(!detail)return <Panel><Empty>Sélectionne un backtest pour ouvrir son audit complet.</Empty></Panel>
   const metrics=detail.metrics||{}
   const positions=safeArray(detail.position_ledger)
@@ -125,7 +126,7 @@ function BacktestDetail({detail}){
           <div>Volatility scaling + exposition marché dynamique · {riskOverlay.method}</div>
         </div>}
       </div>}
-      <AccountCurve detail={detail}/>
+      <BacktestAnalytics detail={detail} registry={registry} fetchBacktest={fetchBacktest}/>
     </Panel>
 
     <Panel>
@@ -158,7 +159,7 @@ function BacktestDetail({detail}){
   </div>
 }
 
-export function BacktestsView({snapshot,detail,onSelect,onRunCandidate,running}){
+export function BacktestsView({snapshot,detail,onSelect,onRunCandidate,running,fetchBacktest}){
   const rows=safeArray(snapshot?.backtests)
   return <div className="space-y-6">
     <SectionHeading title="Backtests" description="V6 est maintenant la référence performance. V7 garde exactement son alpha et teste uniquement une couche de diversification/risque pour réduire les grosses claques et la dépendance aux paniers corrélés." action={<Button kind="primary" icon={RefreshCcw} disabled={running} onClick={onRunCandidate}>{running?'V7 en cours…':'Tester META V7'}</Button>}/>
@@ -175,7 +176,7 @@ export function BacktestsView({snapshot,detail,onSelect,onRunCandidate,running})
           </button>)}
         </div>}
       </Panel>
-      <BacktestDetail detail={detail}/>
+      <BacktestDetail detail={detail} registry={rows} fetchBacktest={fetchBacktest}/>
     </div>
   </div>
 }
