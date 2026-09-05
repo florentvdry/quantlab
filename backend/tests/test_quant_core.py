@@ -15,7 +15,8 @@ def test_future_target_never_crosses_symbol(monkeypatch):
     from app.services import features
     monkeypatch.setattr(features,"synthetic_panel",lambda:synthetic_raw())
     monkeypatch.setattr(features.settings,"data_mode","synthetic")
-    df=features.build_feature_panel().sort_values(["symbol","date"])
+    features.clear_feature_cache(remove_disk=True)
+    df=features.build_feature_panel(force=True).sort_values(["symbol","date"])
     for _,g in df.groupby("symbol"):
         tail=g.tail(20)
         assert tail["future_20d"].isna().all()
@@ -51,3 +52,25 @@ def test_transaction_costs_reduce_return():
     zero=run_backtest({"long_count":1,"short_count":1,"commission_bps":0,"slippage_bps":0},panel=panel)
     costly=run_backtest({"long_count":1,"short_count":1,"commission_bps":20,"slippage_bps":20},panel=panel)
     assert costly["metrics"]["total_return"]<=zero["metrics"]["total_return"]
+
+
+def test_backtest_exposes_auditable_prices_and_orders():
+    from app.services.backtest import run_backtest
+    dates=pd.bdate_range("2023-01-02",periods=340)
+    rows=[]
+    for si,s in enumerate(["A","B","C","D"]):
+        score=1-si/4
+        for i,d in enumerate(dates):
+            px=100+si*5+i*(.08 if s in ("A","B") else -.02)
+            rows.append({"date":d,"symbol":s,"sector":"Test","open":max(10,px),"close":max(10,px),
+                         "meta_score":score,"momentum_12_1_rank":score,"future_relative_20d":0})
+    panel=pd.DataFrame(rows)
+    r=run_backtest({"long_count":1,"short_count":1,"initial_capital":10000},panel=panel)
+    assert r["order_ledger"]
+    assert r["position_ledger"]
+    first=r["position_ledger"][0]
+    assert first["entry_price"]>0
+    assert first["exit_price"]>0
+    assert first["qty"]>0
+    assert "net_pnl_usd" in first
+    assert {o["action"] for o in r["order_ledger"]} & {"BUY","SHORT","SELL","COVER"}
