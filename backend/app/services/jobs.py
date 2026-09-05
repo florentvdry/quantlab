@@ -7,7 +7,7 @@ from app.db.session import SessionLocal
 from app.models.entities import JobRun, ExperimentRun, ModelVersion, BacktestRun
 from app.services.backtest import run_backtest, run_momentum_baseline, run_adaptive_meta
 from app.services.experiments import parameter_sweep, robustness
-from app.services.research import train_walk_forward, factor_summary
+from app.services.research import train_walk_forward, factor_summary, run_model_oos_backtest
 
 QUEUE="quantlab:jobs"
 
@@ -60,6 +60,11 @@ def execute_job(key:str):
             result=robustness(p)
             exp=ExperimentRun(name="Robustness Suite",kind="ROBUSTNESS",status="COMPLETED",payload_json=json.dumps(result,default=str));db.add(exp);db.commit()
             result={"experiment_id":exp.id,**result}
+        elif row.kind in ("RIDGE_BACKTEST","HGB_BACKTEST"):
+            model="ridge" if row.kind=="RIDGE_BACKTEST" else "hgb"
+            update(db,row,progress=20,result_json=json.dumps({"message":"Backtest OOS "+model.upper()+" avec embargo 20 jours"}))
+            result=run_model_oos_backtest(model,p); result["backtest_id"]=_persist_backtest(db,result)
+            update(db,row,progress=90,result_json=json.dumps({"message":"Audit ledger et métriques OOS"}))
         elif row.kind in ("TRAIN_RIDGE","TRAIN_HGB"):
             model="ridge" if row.kind=="TRAIN_RIDGE" else "hgb"
             update(db,row,progress=15,result_json=json.dumps({"message":"Walk-forward "+model.upper()}))
