@@ -10,14 +10,15 @@ from app.services.experiments import parameter_sweep, robustness
 from app.services.research import train_walk_forward, factor_summary, run_model_oos_backtest
 from app.services.meta_v5 import run_meta_v5, latest_meta_v5_signals, meta_v5_validation_bundle
 from app.services.meta_v6 import run_meta_v6, meta_v6_validation_bundle
+from app.services.meta_v7 import run_meta_v7, meta_v7_validation_bundle
 from app.services.json_utils import safe_dumps
 
 QUEUE="quantlab:jobs"
 WORKER_HEARTBEAT="quantlab:worker:heartbeat"
-DEDUP_KINDS={"AUTO_BOOTSTRAP","META_V5","META_V6","META_V5_SIGNALS","VALIDATION","DAILY_PIPELINE","DATA_REFRESH","SEC_REFRESH"}
+DEDUP_KINDS={"AUTO_BOOTSTRAP","META_V5","META_V6","META_V7","META_V5_SIGNALS","VALIDATION","DAILY_PIPELINE","DATA_REFRESH","SEC_REFRESH"}
 
 RESEARCH_JOB_KINDS={
-    "BACKTEST","META_V5","META_V6","V4_BACKTEST","ADAPTIVE_BACKTEST","BASELINE",
+    "BACKTEST","META_V5","META_V6","META_V7","V4_BACKTEST","ADAPTIVE_BACKTEST","BASELINE",
     "SWEEP","ROBUSTNESS","RIDGE_BACKTEST","HGB_BACKTEST",
     "TRAIN_RIDGE","TRAIN_HGB","FACTOR_SUMMARY","VALIDATION","META_V5_SIGNALS",
 }
@@ -83,6 +84,9 @@ def _persist_meta_v5_model(db,result):
 
 def _persist_meta_v6_model(db,result):
     return _persist_meta_model(db,result,"META_V6","meta_v6")
+
+def _persist_meta_v7_model(db,result):
+    return _persist_meta_model(db,result,"META_V7","meta_v7")
 
 def _persist_backtest(db,result):
     m=result["metrics"]
@@ -170,6 +174,16 @@ def execute_job(key:str):
             result["backtest_id"]=_persist_backtest(db,result)
             result["model_version_id"]=_persist_meta_v6_model(db,result)
             update(db,row,progress=95,result_json=safe_dumps({"message":"META V6 — challenger persisté; compare au V5 dans Backtests"}))
+        elif row.kind=="META_V7":
+            def progress_v7(value,message):
+                update(db,row,progress=value,result_json=safe_dumps({"message":message}))
+            update(db,row,progress=10,result_json=safe_dumps({"message":"META V7 — diversification corrélation + volatility scaling"}))
+            bundle=meta_v7_validation_bundle(progress=progress_v7)
+            result=bundle["backtest"]
+            result["meta_v7_validation"]={"robustness":bundle["robustness"],"scenarios":bundle["scenarios"]}
+            result["backtest_id"]=_persist_backtest(db,result)
+            result["model_version_id"]=_persist_meta_v7_model(db,result)
+            update(db,row,progress=95,result_json=safe_dumps({"message":"META V7 — risk challenger persisté; compare au V6 dans Backtests"}))
         elif row.kind=="V4_BACKTEST":
             update(db,row,progress=20,result_json=safe_dumps({"message":"META V4 — long-only, low-turnover, no historical news leakage"}))
             result=run_meta_v4(); result["backtest_id"]=_persist_backtest(db,result)
