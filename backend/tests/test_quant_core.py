@@ -455,7 +455,10 @@ def test_backtest_account_curve_tracks_daily_equity_and_realized_balance():
 
     curve=result["account_curve"]
     assert len(curve)>len(result["equity_curve"])
-    assert {"date","equity_usd","balance_usd","floating_pnl_usd"}<=set(curve[0])
+    assert {"date","equity_usd","balance_usd","floating_pnl_usd","daily_pnl_usd","daily_return","drawdown","gross_exposure","cash_pct","turnover","trade_count","active_symbols"}<=set(curve[0])
     assert any(abs(float(row["equity_usd"])-float(row["balance_usd"]))>0.01 for row in curve[1:-1])
+    assert all(isinstance(row["active_symbols"],list) for row in curve)
+    assert all(float(row["gross_exposure"])>=0 for row in curve[:-1])
+    assert any(int(row["trade_count"])>0 for row in curve)
     assert curve[-1]["equity_usd"]==curve[-1]["balance_usd"]
     assert curve[-1]["equity_usd"]==result["metrics"]["ending_capital_usd"]
