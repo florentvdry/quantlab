@@ -44,6 +44,8 @@ V6_CONFIG = {
     "model_refresh_days": 20,
     "ewma_span": 5,
     "lgbm_members": 3,
+    "lgbm_member_timeout_seconds": 45,
+    "lgbm_threads": 4,
     "meta_threshold_grid": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75],
     "long_count_grid": [8, 10, 12, 15],
     # 6 bps commission + 5 bps slippage on entry and exit.
@@ -106,8 +108,15 @@ def _new_base_models():
             l2_regularization=1.5,
             min_samples_leaf=50,
             random_state=42,
+            early_stopping=True,
+            validation_fraction=0.10,
+            n_iter_no_change=12,
         ),
-        "lgbm": DoubleEnsembleLGBM(members=int(V6_CONFIG["lgbm_members"])),
+        "lgbm": DoubleEnsembleLGBM(
+            members=int(V6_CONFIG["lgbm_members"]),
+            member_timeout_seconds=int(V6_CONFIG["lgbm_member_timeout_seconds"]),
+            threads=int(V6_CONFIG["lgbm_threads"]),
+        ),
     }
 
 
