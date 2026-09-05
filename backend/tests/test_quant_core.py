@@ -519,3 +519,65 @@ def test_daily_max_drawdown_catches_intraperiod_loss():
     ]
     m=_metrics(rebalance,1.0,[0.0,0.0],25.2,daily_curve=daily,initial_capital=100000.0)
     assert m["max_drawdown"]==-0.10
+
+
+def test_quality_universe_filters_recent_and_illiquid_names(monkeypatch,tmp_path):
+    from app.services import real_data
+
+    monkeypatch.setattr(real_data,"DATA_DIR",str(tmp_path))
+    monkeypatch.setattr(real_data.settings,"real_universe_size",2)
+    monkeypatch.setattr(real_data.settings,"real_universe_prefilter_size",4)
+    monkeypatch.setattr(real_data.settings,"real_universe_min_price",10.0)
+    monkeypatch.setattr(real_data.settings,"real_universe_min_history_sessions",700)
+    monkeypatch.setattr(real_data.settings,"real_universe_min_median_dollar_volume",25_000_000.0)
+    monkeypatch.setattr(real_data.settings,"real_universe_max_volatility",0.90)
+
+    monkeypatch.setattr(real_data,"_snapshot_rank",lambda candidates:[
+        ("AAPL",2_000_000_000.0,200.0,10_000_000.0),
+        ("MSFT",1_800_000_000.0,450.0,4_000_000.0),
+        ("NEWCO",1_700_000_000.0,50.0,34_000_000.0),
+        ("TINY",1_600_000_000.0,40.0,40_000_000.0),
+    ])
+    monkeypatch.setattr(real_data,"_quality_history",lambda symbols:pd.DataFrame([
+        {"symbol":"AAPL","history_sessions":1000,"last_price":200.0,"median_dollar_volume_60":1_500_000_000.0,"volatility_60":0.25},
+        {"symbol":"MSFT","history_sessions":1000,"last_price":450.0,"median_dollar_volume_60":1_200_000_000.0,"volatility_60":0.22},
+        {"symbol":"NEWCO","history_sessions":180,"last_price":50.0,"median_dollar_volume_60":900_000_000.0,"volatility_60":0.55},
+        {"symbol":"TINY","history_sessions":900,"last_price":40.0,"median_dollar_volume_60":4_000_000.0,"volatility_60":0.35},
+    ]))
+
+    selected=real_data._quality_rank_universe(["AAPL","MSFT","NEWCO","TINY"])
+    assert selected==["AAPL","MSFT"]
+
+
+def test_v71_balanced_exposure_uses_confidence_and_regime():
+    from app.services.meta_v71 import _target_gross,apply_v71_balanced_exposure
+
+    base=pd.DataFrame([
+        {
+            "date":pd.Timestamp("2026-01-02"),"symbol":"A","v7_trade_score":0.9,
+            "v7_probability_scale":0.20,"v7_vol_scale":0.80,"v7_market_risk_scale":0.50,
+            "v7_threshold":0.50,"v6_meta_probability":0.58,"v6_regime":"RISK_OFF",
+        },
+        {
+            "date":pd.Timestamp("2026-01-02"),"symbol":"B","v7_trade_score":0.8,
+            "v7_probability_scale":0.30,"v7_vol_scale":1.00,"v7_market_risk_scale":0.50,
+            "v7_threshold":0.50,"v6_meta_probability":0.60,"v6_regime":"RISK_OFF",
+        },
+    ])
+    target_risk,_=_target_gross(base)
+
+    trend=base.copy()
+    trend["v6_regime"]="TREND_UP"
+    trend["v7_market_risk_scale"]=1.0
+    trend["v6_meta_probability"]=0.70
+    target_trend,_=_target_gross(trend)
+
+    assert 0.25<=target_risk<=0.95
+    assert target_trend>target_risk
+
+    scored,summary=apply_v71_balanced_exposure(base)
+    selected=scored[scored["v71_trade_score"].notna()]
+    assert len(selected)==2
+    assert float(selected["v71_position_scale"].mean())>=0.25
+    assert float(selected["v71_position_scale"].max())<=1.0
+    assert summary["decision_dates"]==1
