@@ -161,7 +161,7 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
     signal_dates=list(all_dates[warmup::int(p["rebalance_days"])])
     equity=1.0;curve=[];turnovers=[];prev_weights={};prev_qty={}
     benchmark_equity=1.0;benchmark_curve=[]
-    positions=[];orders=[];rebalances=[];gross_pnl=[];costs=[]
+    positions=[];orders=[];rebalances=[];gross_pnl=[];costs=[];account_curve=[]
     initial_capital=float(p.get("initial_capital",100000))
     by_date={d:x.set_index("symbol") for d,x in df.groupby("date")}
     date_pos={d:i for i,d in enumerate(all_dates)}
@@ -287,6 +287,39 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
         period_cost_usd=float(sum(entry_cost_by_symbol.values()))
         turnover=period_trade_notional_usd/max(equity_before_usd,1e-12)
 
+        # Daily account curve for the UI. "Balance" is realized account value
+        # (unchanged while the current period is open, except entry costs), while
+        # "Equity" marks the open positions to each session's open. We exclude
+        # exit_d here because it is also the next period's entry date; the next
+        # iteration will record that date after its own entry costs.
+        realized_balance_usd=equity_before_usd-period_cost_usd
+        for mark_i in range(ep,xp):
+            mark_d=all_dates[mark_i]
+            mark=by_date.get(mark_d)
+            if mark is None:
+                continue
+            floating_gross=0.0
+            invested=0
+            for s,qty in target_qty.items():
+                if s not in entry.index or s not in mark.index:
+                    continue
+                p0=float(entry.loc[s,"open"])
+                pm=float(mark.loc[s,"open"])
+                if p0<=0 or pm<=0:
+                    continue
+                floating_gross+=float(qty)*(pm-p0)
+                invested+=1
+            if not invested:
+                continue
+            mark_equity=realized_balance_usd+floating_gross
+            account_curve.append({
+                "date":str(pd.Timestamp(mark_d).date()),
+                "equity_usd":round(float(mark_equity),2),
+                "balance_usd":round(float(realized_balance_usd),2),
+                "floating_pnl_usd":round(float(floating_gross),2),
+                "rebalance_id":rebalance_id,
+            })
+
         common=entry.index.intersection(exit_.index)
         if len(common):
             bench_ret=(exit_.loc[common,"open"]/entry.loc[common,"open"]-1).replace([np.inf,-np.inf],np.nan).dropna().mean()
@@ -354,6 +387,17 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
                 actual_weights[s]=float(qty)*float(entry.loc[s,"open"])/max(equity_before_usd,1e-12)
         prev_weights=actual_weights;prev_qty=target_qty
 
+    if rebalances:
+        # Final close/mark: no open-period floating P&L remains at the end of the
+        # simulated history, so balance and equity converge.
+        account_curve.append({
+            "date":rebalances[-1]["exit_date"],
+            "equity_usd":rebalances[-1]["equity_after_usd"],
+            "balance_usd":rebalances[-1]["equity_after_usd"],
+            "floating_pnl_usd":0.0,
+            "rebalance_id":rebalances[-1]["rebalance_id"],
+        })
+
     metrics=_metrics(curve,equity,turnovers,252/int(p["rebalance_days"]),positions)
     metrics["gross_return_sum"]=round(float(np.sum(gross_pnl)),4)
     metrics["costs_sum"]=round(float(np.sum(costs)),4)
@@ -396,7 +440,7 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
         "position_scale_column":position_scale_column,
         "execution_timing":"signal_close_T__entry_open_T1",
         "audit_note":"Prices are next-open rebalance marks. Orders show simulated BUY/SELL/SHORT/COVER activity; position_ledger attributes P&L between consecutive rebalance opens.",
-        "metrics":metrics,"equity_curve":curve,
+        "metrics":metrics,"equity_curve":curve,"account_curve":account_curve,
         "benchmark":{"name":"Equal-weight current universe (no costs)","equity_curve":benchmark_curve},
         "ranking_top":[{"rank":i+1,"symbol":r.symbol,"sector":r.sector,"score":round(float(getattr(r,score_column)),4)} for i,r in enumerate(rank_sample.head(30).itertuples())],
         "ranking_bottom":[{"rank":len(rank_sample)-29+i,"symbol":r.symbol,"sector":r.sector,"score":round(float(getattr(r,score_column)),4)} for i,r in enumerate(rank_sample.tail(30).itertuples())],
