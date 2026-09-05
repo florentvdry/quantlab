@@ -39,7 +39,6 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./backend:/app
       - quantdata:/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
@@ -60,7 +59,6 @@ services:
       api:
         condition: service_healthy
     volumes:
-      - ./backend:/app
       - quantdata:/data
 
   scheduler:
@@ -75,7 +73,6 @@ services:
       api:
         condition: service_healthy
     volumes:
-      - ./backend:/app
       - quantdata:/data
 
   trade_stream:
@@ -88,8 +85,6 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    volumes:
-      - ./backend:/app
 
   web:
     build: ./frontend
@@ -102,9 +97,6 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
