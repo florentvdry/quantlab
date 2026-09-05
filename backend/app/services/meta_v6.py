@@ -11,7 +11,9 @@ from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
+from app.core.config import settings
 from app.services.features import build_feature_panel, panel_metadata
+from app.services.research_cache import load as load_research_cache, make_key as make_research_cache_key, save as save_research_cache
 from app.services.meta_v5 import BASE_NAMES, MODEL_FEATURES, REGIMES, DoubleEnsembleLGBM
 
 # V6 does not replace V5. It is an experimental candidate whose labels match the
@@ -33,6 +35,8 @@ V6_PORTFOLIO = {
     "min_long_count": 3,
     "normalize_position_scale": False,
 }
+
+V6_CACHE_VERSION = "v6-aligned-solid-v4-1"
 
 V6_CONFIG = {
     "holding_days": 10,
@@ -433,6 +437,28 @@ def build_meta_v6_oos(
     source = build_feature_panel() if panel is None else panel.copy()
     source = _add_execution_aligned_targets(source)
     source = _context_frame(source).sort_values(["date", "symbol"])
+    dataset_meta=panel_metadata(source)
+    cache_key=make_research_cache_key(
+        "meta_v6_oos",
+        dataset_meta["fingerprint"],
+        V6_CACHE_VERSION,
+        V6_CONFIG,
+        {"model_features":MODEL_FEATURES},
+    )
+    if settings.data_mode.lower()=="alpaca":
+        cached=load_research_cache("meta_v6_oos",cache_key)
+        if cached is not None:
+            cached_scored,cached_research,cached_meta=cached
+            cached_research=dict(cached_research)
+            cached_research["cache"]={
+                "hit":True,
+                "version":V6_CACHE_VERSION,
+                "key":cache_key,
+                "stored_at":cached_meta.get("stored_at"),
+            }
+            if progress:
+                progress(74,"META V6 — cache OOS réutilisé; aucun réentraînement historique")
+            return cached_scored,cached_research
 
     eligible_mask=source["solid_eligible"].fillna(False).astype(bool) if "solid_eligible" in source.columns else pd.Series(True,index=source.index)
     labelled = source[eligible_mask].dropna(
@@ -610,7 +636,10 @@ def build_meta_v6_oos(
         "overall_acceptance_rate": round(float(selected.mean()), 4),
         "refreshes": refreshes,
         "folds": refreshes,
+        "cache":{"hit":False,"version":V6_CACHE_VERSION,"key":cache_key},
     }
+    if settings.data_mode.lower()=="alpaca":
+        save_research_cache("meta_v6_oos",cache_key,scored,summary,dataset_meta["fingerprint"])
     return scored, summary
 
 
