@@ -1,32 +1,33 @@
 from __future__ import annotations
-from itertools import product
+import itertools, numpy as np
 from app.services.backtest import run_backtest
+from app.services.features import build_feature_panel
 
+def parameter_sweep(base=None,grid=None):
+    base=base or {}
+    grid=grid or {"long_count":[10,20,30],"short_count":[10,20,30],"rebalance_days":[5,10,21]}
+    panel=build_feature_panel()
+    keys=list(grid); rows=[]
+    for vals in itertools.product(*(grid[k] for k in keys)):
+        p=base|dict(zip(keys,vals)); r=run_backtest(p,panel=panel)
+        rows.append({"params":p,**r["metrics"]})
+    rows.sort(key=lambda x:x["sharpe"],reverse=True)
+    return {"count":len(rows),"best":rows[0] if rows else None,"results":rows}
 
-def parameter_sweep(base: dict, grid: dict) -> dict:
-    keys=list(grid)
-    combos=list(product(*[grid[k] for k in keys]))
-    runs=[]
-    for vals in combos:
-        cfg=dict(base); cfg.update(dict(zip(keys,vals)))
-        result=run_backtest(cfg)
-        m=result['metrics']
-        runs.append({'params':{k:cfg[k] for k in keys},'metrics':m})
-    runs.sort(key=lambda x:(x['metrics'].get('sharpe') or -999),reverse=True)
-    return {'count':len(runs),'best':runs[0] if runs else None,'runs':runs}
-
-
-def robustness(base: dict) -> dict:
+def robustness(base=None):
+    base=base or {}
+    panel=build_feature_panel()
     scenarios=[
-      ('base',{}),('cost_x2',{'commission_bps':base.get('commission_bps',6)*2,'slippage_bps':base.get('slippage_bps',5)*2}),
-      ('cost_x3',{'commission_bps':base.get('commission_bps',6)*3,'slippage_bps':base.get('slippage_bps',5)*3}),
-      ('weekly',{'rebalance_days':5}),('biweekly',{'rebalance_days':10}),('monthly',{'rebalance_days':21}),
-      ('tb10',{'long_count':10,'short_count':10}),('tb20',{'long_count':20,'short_count':20}),('tb30',{'long_count':30,'short_count':30}),
+        ("base",{}),("costs_x2",{"commission_bps":12,"slippage_bps":10}),("costs_x3",{"commission_bps":18,"slippage_bps":15}),
+        ("weekly",{"rebalance_days":5}),("biweekly",{"rebalance_days":10}),("monthly",{"rebalance_days":21}),
+        ("tb10",{"long_count":10,"short_count":10}),("tb20",{"long_count":20,"short_count":20}),("tb30",{"long_count":30,"short_count":30}),
+        ("gross_1",{"gross_exposure":1.0}),("gross_15",{"gross_exposure":1.5}),
     ]
-    out=[]
-    for name,overrides in scenarios:
-        cfg=dict(base);cfg.update(overrides)
-        r=run_backtest(cfg);out.append({'scenario':name,'params':overrides,'metrics':r['metrics']})
-    sharpes=[x['metrics'].get('sharpe',0) or 0 for x in out]
-    positive=sum(s>0 for s in sharpes)
-    return {'scenarios':out,'summary':{'positive_sharpe_ratio':positive/len(out),'min_sharpe':min(sharpes),'median_sharpe':sorted(sharpes)[len(sharpes)//2],'passed':positive/len(out)>=0.7}}
+    rows=[]
+    for name,override in scenarios:
+        r=run_backtest(base|override,panel=panel)
+        rows.append({"scenario":name,**r["metrics"]})
+    sharpes=[x["sharpe"] for x in rows]
+    positive=sum(x>0 for x in sharpes)/len(sharpes)
+    return {"scenarios":rows,"summary":{"positive_sharpe_ratio":positive,"median_sharpe":float(np.median(sharpes)),
+            "min_sharpe":float(np.min(sharpes)),"passed":positive>=.7}}
