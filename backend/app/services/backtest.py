@@ -130,6 +130,7 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
     by_date={d:x.set_index("symbol") for d,x in df.groupby("date")}
     date_pos={d:i for i,d in enumerate(all_dates)}
     ic_frame=_daily_ic_frame(df) if adaptive else None
+    adaptive_eval_ic=[]
     total_cost_rate=(float(p["commission_bps"])+float(p["slippage_bps"]))/10000
 
     for idx,signal_d in enumerate(signal_dates[:-1]):
@@ -147,6 +148,10 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
             )
             snap["_score"]=sum(snap[f].fillna(.5)*float(aw.get(f,0)) for f in FEATURES)
             active_score="_score"
+            try:
+                eval_ic=snap["_score"].corr(snap["future_relative_20d"],method="spearman")
+                if np.isfinite(eval_ic):adaptive_eval_ic.append(float(eval_ic))
+            except Exception:pass
         else:
             active_score=score_column
         snap=snap.sort_values(active_score,ascending=False)
@@ -254,7 +259,10 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
             include_groups=False
         ).mean()
     except Exception:ic=np.nan
-    metrics["mean_rank_ic_20d"]=None if not np.isfinite(ic) else round(float(ic),4)
+    if adaptive and adaptive_eval_ic:
+        metrics["mean_rank_ic_20d"]=round(float(np.mean(adaptive_eval_ic)),4)
+    else:
+        metrics["mean_rank_ic_20d"]=None if not np.isfinite(ic) else round(float(ic),4)
     rank_sample=df[df.date==df.date.max()].sort_values(score_column,ascending=False)
     return {
         "strategy":strategy_name,"score_column":"adaptive_train_only" if adaptive else score_column,
