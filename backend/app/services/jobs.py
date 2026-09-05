@@ -5,7 +5,7 @@ from redis import Redis
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.entities import JobRun, ExperimentRun, ModelVersion, BacktestRun
-from app.services.backtest import run_backtest, run_momentum_baseline
+from app.services.backtest import run_backtest, run_momentum_baseline, run_adaptive_meta
 from app.services.experiments import parameter_sweep, robustness
 from app.services.research import train_walk_forward, factor_summary
 
@@ -43,6 +43,10 @@ def execute_job(key:str):
             update(db,row,progress=20,result_json=json.dumps({"message":"Construction des features et du portefeuille"}))
             result=run_backtest(p); result["backtest_id"]=_persist_backtest(db,result)
             update(db,row,progress=90,result_json=json.dumps({"message":"Calcul des métriques"}))
+        elif row.kind=="ADAPTIVE_BACKTEST":
+            update(db,row,progress=20,result_json=json.dumps({"message":"Adaptive META V3 — poids train-only"}))
+            result=run_adaptive_meta(p); result["backtest_id"]=_persist_backtest(db,result)
+            update(db,row,progress=90,result_json=json.dumps({"message":"Audit ledger et métriques"}))
         elif row.kind=="BASELINE":
             update(db,row,progress=20,result_json=json.dumps({"message":"Baseline momentum 12-1"}))
             result=run_momentum_baseline(p); result["backtest_id"]=_persist_backtest(db,result)
