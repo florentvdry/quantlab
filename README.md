@@ -86,23 +86,24 @@ Le parcours normal ne demande plus de lancer une succession de boutons. L'Autopi
 
 Le polling UI ne synchronise plus Alpaca à chaque rafraîchissement : compte, positions, jobs, validations, facteurs et datasets sont lus depuis PostgreSQL / Redis / Feature Store local. Les appels broker réseau restent réservés aux synchronisations et opérations explicites.
 
-## Universe V3 — solid operating companies
+## Universe V4 — solid operating companies
 
-Le moteur vise désormais ~120 sociétés US opérationnelles établies plutôt qu'un grand panier de titres simplement liquides :
+Le moteur vise désormais ~160 sociétés US opérationnelles établies, avec assez de largeur pour le cross-sectionnel sans retomber dans un univers de titres secondaires :
 
-- préfiltre des 250 actions les plus liquides ;
+- préfiltre des 350 actions les plus liquides ;
 - prix >= 10 USD ;
-- au moins 1000 séances d'historique pour entrer dans l'univers courant ;
-- médiane dollar-volume 60j >= 50 M USD/jour ;
-- volatilité annualisée 60j <= 65 % ;
+- au moins 750 séances d'historique pour entrer dans l'univers courant ;
+- médiane dollar-volume 60j >= 30 M USD/jour ;
+- volatilité annualisée 60j <= 80 % ;
 - présence de fondamentaux SEC exploitables ;
 - actifs et capitaux propres positifs ;
-- résultat net positif ou cash-flow opérationnel positif ;
+- taille économique minimale : revenu >= 1 Md USD ou actifs >= 5 Md USD ;
+- la profitabilité reste un facteur de qualité, mais n'est plus un hard gate qui élimine une grande société pendant une année faible ;
 - ETF/ETN/funds/warrants/rights/units exclus, avec exclusions explicites des principaux sponsors de produits leveraged/inverse ;
 - score final combinant liquidité, ancienneté et stabilité ;
 - diagnostics persistés dans `universe_quality.json` et visibles dans System.
 
-Le Feature Store applique en plus un filtre point-in-time : une société n'est tradable historiquement que lorsqu'elle avait déjà au moins 700 séances d'historique, des fondamentaux alors publiés suffisamment complets, une liquidité suffisante et une volatilité compatible avec le filtre. Cela évite d'utiliser rétrospectivement la qualité actuelle d'une société pour autoriser un trade ancien.
+Le Feature Store applique en plus un filtre point-in-time distinct et un peu moins strict : une société n'est tradable historiquement que lorsqu'elle avait déjà au moins 504 séances d'historique, des fondamentaux alors publiés suffisamment complets, au moins 20 M USD/jour de dollar-volume médian 60j et une volatilité 60j <= 90 %. Le but est d'éviter le biais de qualité actuelle tout en conservant suffisamment de largeur historique pour le walk-forward.
 
 ## META V7.1 — balanced exposure
 
