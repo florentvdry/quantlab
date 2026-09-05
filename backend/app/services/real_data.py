@@ -194,6 +194,13 @@ def _quality_rank_universe(candidates):
     os.replace(tmp,final)
     return selected
 
+def universe_quality_metadata():
+    path=os.path.join(DATA_DIR,"universe_quality.json")
+    if not os.path.exists(path):return {}
+    try:
+        with open(path,encoding="utf-8") as fh:return json.load(fh)
+    except Exception:return {}
+
 def universe(force=False):
     path=os.path.join(DATA_DIR,"universe.json")
     if os.path.exists(path) and not force and pd.Timestamp.now().timestamp()-os.path.getmtime(path)<24*3600:
