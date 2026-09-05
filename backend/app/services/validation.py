@@ -53,8 +53,8 @@ def validation_report(params=None, progress=None, panel=None, bundle=None):
             "detail": candidate.get("execution_timing"),
         },
         {
-            "name": "strict_nested_oos",
-            "ok": candidate.get("research_status") == "STRICT_OOS_NESTED_WALK_FORWARD",
+            "name": "strict_continuous_oos",
+            "ok": candidate.get("research_status") == "STRICT_OOS_CONTINUOUS_WALK_FORWARD",
             "detail": candidate.get("research_status"),
         },
         {
