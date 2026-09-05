@@ -13,7 +13,7 @@ from app.models.entities import BacktestRun,PaperPosition,ExecutionLog,Rebalance
 from app.core.config import settings
 from app.services.backtest import run_backtest
 from app.services.broker import PaperBrokerService
-from app.services.features import build_feature_panel,panel_metadata
+from app.services.features import build_feature_panel,panel_metadata,feature_store_status
 from app.services.execution import ExecutionService
 from app.services.jobs import enqueue
 from app.services.monitoring import snapshot_paper,paper_history,compare_paper_backtest,promotion_gate
@@ -50,6 +50,9 @@ def ready(db:Session=Depends(get_db)):
     except Exception as e: checks["redis"]=str(e)
     return JSONResponse(status_code=200 if all(v is True for v in checks.values()) else 503,content={"ready":all(v is True for v in checks.values()),"checks":checks})
 
+@app.get("/api/feature-store/status")
+def feature_status():return feature_store_status()
+
 @app.get("/api/system/status")
 def system_status():
     return {"data_mode":settings.data_mode,"alpaca_configured":bool(settings.alpaca_api_key and settings.alpaca_secret_key),
@@ -59,16 +62,17 @@ def system_status():
 @app.get("/api/setup")
 def setup(db:Session=Depends(get_db)):
     from app.services.dataset_state import states
-    s=states(db);alpaca=bool(settings.alpaca_api_key and settings.alpaca_secret_key)
+    s=states(db);alpaca=bool(settings.alpaca_api_key and settings.alpaca_secret_key);fs=feature_store_status()
+    dq_state=s.get("data_quality",{})
     steps=[
         {"name":"Market Data","ok":settings.data_mode=="synthetic" or alpaca,"detail":settings.data_mode},
         {"name":"Historical Dataset","ok":"market_data" in s or settings.data_mode=="synthetic","detail":s.get("market_data")},
-        {"name":"Feature Store","ok":"features" in s,"detail":s.get("features")},
-        {"name":"Data Quality","ok":s.get("data_quality",{}).get("status")=="PASS","detail":s.get("data_quality")},
+        {"name":"Feature Store","ok":fs["ready"],"detail":fs},
+        {"name":"Data Quality","ok":fs["ready"] and dq_state.get("status")=="PASS","detail":dq_state if fs["ready"] else {"status":"NOT_READY","message":fs["message"]}},
         {"name":"Strategy","ok":db.query(StrategyVersion).count()>0,"detail":db.query(StrategyVersion).count()},
         {"name":"Paper Trading","ok":bool(db.query(StrategyVersion).filter(StrategyVersion.status=="PAPER").first()),"detail":"locked unless validated"},
     ]
-    return {"steps":steps,"research_unlocked":all(x["ok"] for x in steps[:4]),"paper_locked":not steps[-1]["ok"] or not settings.allow_alpaca_paper_orders}
+    return {"steps":steps,"research_unlocked":all(x["ok"] for x in steps[:4]),"paper_locked":not steps[-1]["ok"] or not settings.allow_alpaca_paper_orders,"feature_store":fs}
 
 @app.get("/api/dashboard")
 def dashboard(db:Session=Depends(get_db)):
@@ -101,6 +105,8 @@ def create_backtest(req:BacktestRequest,db:Session=Depends(get_db)):
 
 @app.get("/api/factors/latest")
 def factors_latest():
+    if not feature_store_status()["ready"]:
+        return []
     df=build_feature_panel();snap=df[df.date==df.date.max()].sort_values("meta_score",ascending=False)
     cols=["symbol","sector","meta_score","momentum_12_1_rank","fundamental_raw_rank","earnings_raw_rank","news_raw_rank","low_vol_rank","liquidity_rank"]
     return snap[cols].head(100).round(4).to_dict("records")
