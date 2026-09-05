@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -319,11 +320,13 @@ def fetch_bars(force=False):
     start=_requested_history_start()
     end=date.today().isoformat()
     meta=market_data_metadata()
+    universe_hash=hashlib.sha256(",".join(sorted(syms)).encode()).hexdigest()[:16]
     cache_matches=(
         os.path.exists(path)
         and meta.get("requested_start")==start
         and meta.get("feed")==settings.alpaca_feed
         and meta.get("universe_size")==len(syms)
+        and meta.get("universe_hash")==universe_hash
     )
     if cache_matches and not force and pd.Timestamp.now().timestamp()-os.path.getmtime(path)<12*3600:
         return pd.read_parquet(path)
@@ -381,6 +384,7 @@ def fetch_bars(force=False):
         "feed":settings.alpaca_feed,
         "symbols":int(df.symbol.nunique()),
         "universe_size":len(syms),
+        "universe_hash":universe_hash,
         "rows":int(len(df)),
         "updated_at":pd.Timestamp.utcnow().isoformat(),
         "failures":failures[:20],
