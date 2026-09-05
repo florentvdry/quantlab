@@ -36,7 +36,11 @@ def run_daily_pipeline(db,force_market=False,refresh_sec=False,progress=None):
             result["steps"].append({"name":"sec",**sec});set_state(db,"fundamentals",sec)
     progress(55,"Construction du Feature Store")
     clear_feature_cache();panel=build_feature_panel(force=True);meta=panel_metadata(panel);latest=panel.date.max();snap=panel[panel.date==latest]
-    state={"version":meta["fingerprint"],"schema":meta["schema"],"rows":len(panel),"latest":str(latest),"symbols":int(snap.symbol.nunique()),"mode":meta["mode"]}
+    state={"version":meta["fingerprint"],"schema":meta["schema"],"rows":len(panel),"latest":str(latest),"symbols":int(snap.symbol.nunique()),"mode":meta["mode"],
+           "solid_eligible_symbols_latest":meta.get("solid_eligible_symbols_latest"),
+           "solid_eligible_symbols_median":meta.get("solid_eligible_symbols_median"),
+           "solid_eligible_symbols_p10":meta.get("solid_eligible_symbols_p10"),
+           "solid_eligible_from":meta.get("solid_eligible_from")}
     if settings.data_mode.lower()=="alpaca":
         from app.services.sec_fundamentals import diagnostics as sec_diagnostics
         result["sec_diagnostics"]=sec_diagnostics()
