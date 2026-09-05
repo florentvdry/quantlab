@@ -5,10 +5,12 @@ class Settings(BaseSettings):
     data_mode:str='synthetic'; synthetic_seed:int=42; synthetic_symbols:int=120; synthetic_years:int=6
     alpaca_api_key:str=''; alpaca_secret_key:str=''; alpaca_paper_base_url:str='https://paper-api.alpaca.markets'; alpaca_data_base_url:str='https://data.alpaca.markets'
     alpaca_feed:str='iex'; real_history_start:str='2016-01-01'; real_history_years:int=5
-    real_universe_size:int=120; real_universe_prefilter_size:int=250
-    real_universe_min_price:float=10.0; real_universe_min_history_sessions:int=1000
-    real_universe_min_median_dollar_volume:float=50000000.0; real_universe_max_volatility:float=0.65
-    real_trade_min_history_sessions:int=700; real_universe_min_sec_core_metrics:int=3
+    real_universe_size:int=160; real_universe_prefilter_size:int=350
+    real_universe_min_price:float=10.0; real_universe_min_history_sessions:int=750
+    real_universe_min_median_dollar_volume:float=30000000.0; real_universe_max_volatility:float=0.80
+    real_trade_min_history_sessions:int=504; real_trade_min_median_dollar_volume:float=20000000.0
+    real_trade_max_volatility:float=0.90; real_universe_min_sec_core_metrics:int=3
+    real_universe_min_revenue:float=1000000000.0; real_universe_min_assets:float=5000000000.0
     sec_user_agent:str='QuantLab local research contact@example.com'
     trading_env:str='PAPER'; paper_auto_enabled:bool=False; allow_alpaca_paper_orders:bool=False
     paper_auto_weekday:int=0; paper_auto_hour_et:int=9; paper_auto_minute_et:int=35; paper_auto_top_n:int=20
