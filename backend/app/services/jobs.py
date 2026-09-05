@@ -8,6 +8,7 @@ from app.models.entities import JobRun, ExperimentRun, ModelVersion, BacktestRun
 from app.services.backtest import run_backtest, run_momentum_baseline, run_adaptive_meta, run_meta_v4
 from app.services.experiments import parameter_sweep, robustness
 from app.services.research import train_walk_forward, factor_summary, run_model_oos_backtest
+from app.services.meta_v5 import run_meta_v5
 
 QUEUE="quantlab:jobs"
 
@@ -43,6 +44,21 @@ def execute_job(key:str):
             update(db,row,progress=20,result_json=json.dumps({"message":"Construction des features et du portefeuille"}))
             result=run_backtest(p); result["backtest_id"]=_persist_backtest(db,result)
             update(db,row,progress=90,result_json=json.dumps({"message":"Calcul des métriques"}))
+        elif row.kind=="META_V5":
+            def progress_v5(value,message):
+                update(db,row,progress=value,result_json=json.dumps({"message":message}))
+            update(db,row,progress=10,result_json=json.dumps({"message":"META V5 — nested walk-forward initialisation"}))
+            result=run_meta_v5(params=p,progress=progress_v5)
+            result["backtest_id"]=_persist_backtest(db,result)
+            last=db.query(ModelVersion).filter(ModelVersion.name=="META_V5").order_by(ModelVersion.version.desc()).first()
+            mv=ModelVersion(
+                name="META_V5",version=(last.version+1 if last else 1),model_type="meta_ensemble",
+                metrics_json=json.dumps(result.get("meta_v5",{}),default=str),
+                config_json=json.dumps({"portfolio":result.get("params",{}),"architecture":result.get("meta_v5",{}).get("architecture",{})},default=str)
+            )
+            db.add(mv);db.commit();db.refresh(mv)
+            result["model_version_id"]=mv.id
+            update(db,row,progress=95,result_json=json.dumps({"message":"META V5 — persistance du modèle et du backtest"}))
         elif row.kind=="V4_BACKTEST":
             update(db,row,progress=20,result_json=json.dumps({"message":"META V4 — long-only, low-turnover, no historical news leakage"}))
             result=run_meta_v4(); result["backtest_id"]=_persist_backtest(db,result)
