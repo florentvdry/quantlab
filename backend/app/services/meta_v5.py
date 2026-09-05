@@ -41,7 +41,7 @@ V5_PORTFOLIO = {
     "normalize_position_scale": False,
 }
 
-V5_CACHE_VERSION = "v5-continuous-solid-v4-1"
+V5_CACHE_VERSION = "v5-continuous-solid-v4-2"
 
 V5_CONFIG = {
     "min_train_days": 126,
@@ -53,6 +53,7 @@ V5_CONFIG = {
     "lgbm_members": 3,
     "lgbm_member_timeout_seconds": 45,
     "lgbm_threads": 4,
+    "min_cross_section_names": 20,
 }
 
 
@@ -448,7 +449,14 @@ def build_meta_v5_oos(
                 progress(74,"META V5 — cache OOS réutilisé; aucun réentraînement historique")
             return cached_scored,cached_research
     eligible_mask=source["solid_eligible"].fillna(False).astype(bool) if "solid_eligible" in source.columns else pd.Series(True,index=source.index)
-    labelled = source[eligible_mask].dropna(subset=MODEL_FEATURES + ["future_relative_20d"]).copy()
+    eligible_source=source[eligible_mask].copy()
+    eligible_counts=eligible_source.groupby("date")["symbol"].nunique()
+    valid_cross_section_dates=set(
+        eligible_counts[eligible_counts>=int(V5_CONFIG["min_cross_section_names"])].index
+    )
+    labelled = eligible_source[eligible_source["date"].isin(valid_cross_section_dates)].dropna(
+        subset=MODEL_FEATURES + ["future_relative_20d"]
+    ).copy()
     all_dates = np.array(sorted(source["date"].unique()))
 
     min_train = int(V5_CONFIG["min_train_days"])
@@ -557,7 +565,7 @@ def build_meta_v5_oos(
         current = by_date[signal_date].dropna(subset=MODEL_FEATURES).copy()
         if "solid_eligible" in current.columns:
             current=current[current["solid_eligible"].fillna(False).astype(bool)].copy()
-        if current.empty:
+        if len(current)<int(V5_CONFIG["min_cross_section_names"]):
             continue
 
         current_pred = _predict_base(live_models, current)
@@ -626,6 +634,7 @@ def build_meta_v5_oos(
             "smoothing": f"stateful one-sided EWMA span={V5_CONFIG['ewma_span']}",
             "meta_labeler": "logistic trade/skip + held-out Platt calibration",
             "position_sizing": "calibrated probability, 25%-100% scale, no forced full exposure",
+            "min_cross_section_names": int(V5_CONFIG["min_cross_section_names"]),
             "historical_news": "excluded",
         },
         "oos_mean_rank_ic": round(float(daily.mean()), 5) if len(daily) else None,
