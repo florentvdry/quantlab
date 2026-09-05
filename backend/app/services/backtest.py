@@ -498,6 +498,12 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
             "turnover":0.0,
             "cost_usd":0.0,
             "trade_count":0,
+            "gross_exposure":0.0,
+            "net_exposure":0.0,
+            "cash_pct":1.0,
+            "position_count":0,
+            "largest_weight":0.0,
+            "active_symbols":[],
         })
         account_curve.append(final_context)
 
