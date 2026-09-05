@@ -39,6 +39,7 @@ def run_daily_pipeline(db,force_market=False,refresh_sec=False,progress=None):
     progress(80,"Contrôle qualité des données")
     dq=report();set_state(db,"data_quality",dq);result["quality"]=dq
     progress(92,"Génération du ranking courant")
-    result["ranking"]=[{"symbol":r.symbol,"score":round(float(r.meta_score),4)} for r in snap.sort_values("meta_score",ascending=False).head(20).itertuples()]
+    result["ranking"]=[{"symbol":r.symbol,"score":round(float(r.meta_score),4)} for r in snap.sort_values("meta_score",ascending=False).head(50).itertuples()]
+    set_state(db,"ranking.latest",{"latest":str(latest),"rows":result["ranking"]})
     result["completed_at"]=datetime.now(timezone.utc).isoformat()
     return result
