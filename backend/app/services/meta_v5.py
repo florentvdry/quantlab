@@ -370,103 +370,177 @@ def build_meta_v5_oos(
     panel: pd.DataFrame | None = None,
     progress: Callable[[int, str], None] | None = None,
 ) -> tuple[pd.DataFrame, dict]:
+    """Continuous expanding walk-forward simulation.
+
+    There is no fixed train/test split. After the minimum startup history, every
+    subsequent trading day is scored exactly as it would have been live:
+    labels stop 20 sessions before the scoring date, models are refreshed only
+    from then-known data, and scores are carried forward until the next refresh.
+    """
     source = build_feature_panel() if panel is None else panel.copy()
-    source = _regime_frame(source)
+    source = _regime_frame(source).sort_values(["date", "symbol"])
     labelled = source.dropna(subset=MODEL_FEATURES + ["future_relative_20d"]).copy()
-    dates = np.array(sorted(labelled["date"].unique()))
+    all_dates = np.array(sorted(source["date"].unique()))
 
     min_train = int(V5_CONFIG["min_train_days"])
-    test_days = int(V5_CONFIG["test_days"])
     validation_days = int(V5_CONFIG["validation_days"])
     embargo = int(V5_CONFIG["embargo_days"])
-    if len(dates) < min_train + 40:
-        min_train = max(320, int(len(dates) * 0.55))
-        validation_days = max(63, int(len(dates) * 0.15))
-        test_days = max(63, int(len(dates) * 0.15))
+    refresh_days = max(1, int(V5_CONFIG["model_refresh_days"]))
+    first_score_idx = min_train + validation_days + 2 * embargo
 
-    folds = []
+    if len(all_dates) <= first_score_idx + 20:
+        raise ValueError(
+            f"Not enough history for continuous META V5: need > {first_score_idx + 20} feature-valid sessions, got {len(all_dates)}"
+        )
+
+    by_date = {d: frame.copy() for d, frame in source.groupby("date")}
     predictions = []
-    start = min_train
-    fold_no = 0
-    estimated_folds = max(1, math.ceil((len(dates) - start) / max(test_days, 1)))
+    refreshes = []
+    ewma_state: dict[str, float] = {}
+    alpha = 2.0 / (float(V5_CONFIG["ewma_span"]) + 1.0)
 
-    while start < len(dates):
-        stop = min(start + test_days, len(dates))
-        outer_train_stop = start - embargo
-        val_start = outer_train_stop - validation_days
-        base_train_stop = val_start - embargo
-        if base_train_stop < 126 or val_start <= base_train_stop:
-            break
+    live_models = None
+    router = None
+    meta = None
+    refresh_id = 0
+    refresh_total = max(1, math.ceil((len(all_dates) - first_score_idx) / refresh_days))
 
-        base_dates = dates[:base_train_stop]
-        val_dates = dates[val_start:outer_train_stop]
-        test_dates = dates[start:stop]
-        if len(test_dates) < 20 or len(val_dates) < 40:
-            break
+    for date_i in range(first_score_idx, len(all_dates)):
+        signal_date = all_dates[date_i]
+        must_refresh = live_models is None or (date_i - first_score_idx) % refresh_days == 0
 
-        fold_no += 1
-        if progress:
-            pct = 10 + int(65 * (fold_no - 1) / estimated_folds)
-            progress(pct, f"META V5 fold {fold_no}: base models + meta-labeler")
+        if must_refresh:
+            safe_stop = date_i - embargo
+            val_start = safe_stop - validation_days
+            base_stop = val_start - embargo
 
-        base_train = labelled[labelled["date"].isin(base_dates)]
-        validation = labelled[labelled["date"].isin(val_dates)]
-        outer_train = labelled[labelled["date"].isin(dates[:outer_train_stop])]
-        test = labelled[labelled["date"].isin(test_dates)]
+            if base_stop < min_train:
+                continue
 
-        # Nested OOS predictions for ensemble weighting + meta-labeler training.
-        val_models = _fit_base(base_train)
-        val_pred = _predict_base(val_models, validation)
-        router, router_diag = _router_weights(val_pred)
-        val_pred = _blend(val_pred, router)
-        meta = _fit_meta_layer(val_pred)
+            base_dates = all_dates[:base_stop]
+            val_dates = all_dates[val_start:safe_stop]
+            safe_train_dates = all_dates[:safe_stop]
 
-        # Refit base learners on every label safely available before outer test.
-        test_models = _fit_base(outer_train)
-        test_pred = _predict_base(test_models, test)
-        test_pred = _blend(test_pred, router)
-        test_pred = _apply_meta(test_pred, meta)
+            base_train = labelled[labelled["date"].isin(base_dates)]
+            validation = labelled[labelled["date"].isin(val_dates)]
+            safe_train = labelled[labelled["date"].isin(safe_train_dates)]
 
-        daily = _daily_ic(test_pred, "v5_smooth_score")
-        accepted = test_pred["v5_trade_score"].notna()
-        fold_summary = {
-            "fold": fold_no,
-            "base_train_from": str(pd.Timestamp(base_dates[0]).date()),
-            "base_train_to": str(pd.Timestamp(base_dates[-1]).date()),
-            "validation_from": str(pd.Timestamp(val_dates[0]).date()),
-            "validation_to": str(pd.Timestamp(val_dates[-1]).date()),
-            "test_from": str(pd.Timestamp(test_dates[0]).date()),
-            "test_to": str(pd.Timestamp(test_dates[-1]).date()),
-            "embargo_days": embargo,
-            "rank_ic": round(float(daily.mean()), 5) if len(daily) else None,
-            "positive_ic_ratio": round(float((daily > 0).mean()), 4) if len(daily) else None,
-            "acceptance_rate": round(float(accepted.mean()), 4),
-            "meta": meta.diagnostics,
-            "router_weights": router,
-            "router_diagnostics": router_diag,
-            "lgbm": test_models["lgbm"].diagnostics(),
-        }
-        folds.append(fold_summary)
-        predictions.append(test_pred[[
+            if (
+                base_train["date"].nunique() < min_train
+                or validation["date"].nunique() < max(20, validation_days // 2)
+                or safe_train.empty
+            ):
+                continue
+
+            refresh_id += 1
+            if progress:
+                pct = 10 + int(65 * (refresh_id - 1) / refresh_total)
+                progress(
+                    min(74, pct),
+                    f"META V5 continuous {pd.Timestamp(signal_date).date()} — refresh modèle {refresh_id}/{refresh_total}",
+                )
+
+            # The validation slice is itself strictly OOS relative to base_train.
+            validation_models = _fit_base(base_train)
+            val_pred = _predict_base(validation_models, validation)
+            router, router_diag = _router_weights(val_pred)
+            val_pred = _blend(val_pred, router)
+            meta = _fit_meta_layer(val_pred)
+
+            # Live model sees every target whose 20d outcome is knowable at signal_date.
+            live_models = _fit_base(safe_train)
+
+            if refreshes:
+                refreshes[-1]["test_to"] = str(pd.Timestamp(all_dates[date_i - 1]).date())
+
+            refreshes.append({
+                "fold": refresh_id,
+                "refresh": refresh_id,
+                "base_train_from": str(pd.Timestamp(base_dates[0]).date()),
+                "base_train_to": str(pd.Timestamp(base_dates[-1]).date()),
+                "validation_from": str(pd.Timestamp(val_dates[0]).date()),
+                "validation_to": str(pd.Timestamp(val_dates[-1]).date()),
+                "safe_train_to": str(pd.Timestamp(safe_train_dates[-1]).date()),
+                "test_from": str(pd.Timestamp(signal_date).date()),
+                "test_to": None,
+                "embargo_days": embargo,
+                "meta": meta.diagnostics,
+                "router_weights": router,
+                "router_diagnostics": router_diag,
+                "lgbm": live_models["lgbm"].diagnostics(),
+            })
+
+        if live_models is None or router is None or meta is None:
+            continue
+
+        current = by_date[signal_date].dropna(subset=MODEL_FEATURES).copy()
+        if current.empty:
+            continue
+
+        current_pred = _predict_base(live_models, current)
+        current_pred = _blend(current_pred, router)
+
+        # Stateful EWMA: today's smoothing uses only scores that were actually
+        # generated on earlier historical dates, never retroactively re-scored data.
+        smooth_values = []
+        for row in current_pred.itertuples():
+            raw = float(row.v5_raw_score)
+            previous = ewma_state.get(row.symbol)
+            smooth = raw if previous is None else alpha * raw + (1.0 - alpha) * previous
+            ewma_state[row.symbol] = smooth
+            smooth_values.append(smooth)
+        current_pred["v5_smooth_score"] = smooth_values
+        current_pred = _apply_meta(current_pred, meta)
+        current_pred["v5_refresh_id"] = refresh_id
+
+        predictions.append(current_pred[[
             "date", "symbol", "v5_regime", "v5_raw_score", "v5_smooth_score",
             "v5_meta_probability", "v5_position_scale", "v5_trade_score",
+            "v5_refresh_id",
         ]])
-        start = stop
 
     if not predictions:
-        raise ValueError("Not enough history for META V5 nested walk-forward")
+        raise ValueError("Continuous META V5 produced no historical live-like predictions")
 
+    refreshes[-1]["test_to"] = str(pd.Timestamp(all_dates[-1]).date())
     oos = pd.concat(predictions, ignore_index=True)
     scored = source.merge(oos, on=["date", "symbol"], how="left", suffixes=("", "_oos"))
+
+    for refresh in refreshes:
+        part = scored[scored["v5_refresh_id"] == refresh["refresh"]]
+        daily_part = _daily_ic(part, "v5_smooth_score")
+        accepted_part = part["v5_trade_score"].notna()
+        refresh["rank_ic"] = round(float(daily_part.mean()), 5) if len(daily_part) else None
+        refresh["positive_ic_ratio"] = round(float((daily_part > 0).mean()), 4) if len(daily_part) else None
+        refresh["acceptance_rate"] = round(float(accepted_part.mean()), 4) if len(part) else None
+
     daily = _daily_ic(scored, "v5_smooth_score")
     accepted = oos["v5_trade_score"].notna()
+    scored_dates = np.array(sorted(oos["date"].unique()))
+
     summary = {
         "name": "META Ensemble v5",
         "dataset": panel_metadata(source),
+        "simulation": {
+            "method": "CONTINUOUS_EXPANDING_WALK_FORWARD",
+            "fixed_holdout": False,
+            "feature_valid_from": str(pd.Timestamp(all_dates[0]).date()),
+            "first_live_like_score": str(pd.Timestamp(scored_dates[0]).date()),
+            "last_live_like_score": str(pd.Timestamp(scored_dates[-1]).date()),
+            "feature_valid_sessions": int(len(all_dates)),
+            "live_like_sessions": int(len(scored_dates)),
+            "coverage_ratio": round(float(len(scored_dates) / len(all_dates)), 4),
+            "initial_startup_sessions": int(first_score_idx),
+            "min_train_days": min_train,
+            "validation_days": validation_days,
+            "target_embargo_days": embargo,
+            "model_refresh_days": refresh_days,
+            "rebalance_days": int(V5_PORTFOLIO["rebalance_days"]),
+        },
         "architecture": {
             "base_models": ["Ridge", "HistGradientBoosting", "DoubleEnsemble-style LightGBM x3", "Momentum"],
-            "ensemble": "validation RankIC weighted + regime router",
-            "smoothing": f"one-sided EWMA span={V5_CONFIG['ewma_span']}",
+            "ensemble": "past validation RankIC weighted + regime router",
+            "smoothing": f"stateful one-sided EWMA span={V5_CONFIG['ewma_span']}",
             "meta_labeler": "logistic trade/skip + held-out Platt calibration",
             "position_sizing": "calibrated probability, 25%-100% scale, no forced full exposure",
             "historical_news": "excluded",
@@ -475,10 +549,10 @@ def build_meta_v5_oos(
         "oos_ic_ir": round(float(daily.mean() / (daily.std() + 1e-12)), 4) if len(daily) > 1 else None,
         "positive_oos_ic_ratio": round(float((daily > 0).mean()), 4) if len(daily) else None,
         "overall_acceptance_rate": round(float(accepted.mean()), 4),
-        "folds": folds,
+        "folds": refreshes,
+        "refreshes": refreshes,
     }
     return scored, summary
-
 
 def run_meta_v5(
     panel: pd.DataFrame | None = None,
