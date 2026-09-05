@@ -529,3 +529,51 @@ def meta_v5_robustness(panel: pd.DataFrame | None = None, progress=None) -> dict
         "turnover_base": next((r["avg_turnover_per_rebalance"] for r in rows if r["scenario"] == "base"), None),
     }
     return {"research": research, "summary": summary, "scenarios": rows}
+
+
+def meta_v5_validation_bundle(panel: pd.DataFrame | None = None, progress=None) -> dict:
+    """Build OOS predictions once, then stress only portfolio/cost assumptions."""
+    from app.services.backtest import run_backtest
+
+    scored, research = build_meta_v5_oos(panel=panel, progress=progress)
+    base = run_backtest(
+        V5_PORTFOLIO,
+        score_column="v5_trade_score",
+        strategy_name="META Ensemble v5 OOS",
+        panel=scored,
+        position_scale_column="v5_position_scale",
+    )
+    base["meta_v5"] = research
+    base["research_status"] = "STRICT_OOS_NESTED_WALK_FORWARD"
+
+    scenarios = [
+        ("base", {}),
+        ("long_10", {"long_count": 10, "min_long_count": 4}),
+        ("long_20", {"long_count": 20, "min_long_count": 6}),
+        ("rebalance_5", {"rebalance_days": 5}),
+        ("rebalance_20", {"rebalance_days": 20}),
+        ("cost_x2", {"commission_bps": 12.0, "slippage_bps": 10.0}),
+        ("cost_x3", {"commission_bps": 18.0, "slippage_bps": 15.0}),
+    ]
+    rows = []
+    for i, (name, override) in enumerate(scenarios):
+        if progress:
+            progress(78 + int(17 * i / len(scenarios)), f"META V5 validation stress: {name}")
+        result = run_backtest(
+            V5_PORTFOLIO | override,
+            score_column="v5_trade_score",
+            strategy_name=f"META V5 {name}",
+            panel=scored,
+            position_scale_column="v5_position_scale",
+        )
+        rows.append({"scenario": name, **result["metrics"]})
+
+    sharpes = np.array([r["sharpe"] for r in rows], dtype=float)
+    robust = {
+        "positive_sharpe_ratio": round(float((sharpes > 0).mean()), 4),
+        "median_sharpe": round(float(np.median(sharpes)), 3),
+        "min_sharpe": round(float(np.min(sharpes)), 3),
+        "cost_stress_pass": all(r["sharpe"] > 0 for r in rows if r["scenario"] in ("cost_x2", "cost_x3")),
+        "turnover_base": next((r["avg_turnover_per_rebalance"] for r in rows if r["scenario"] == "base"), None),
+    }
+    return {"backtest": base, "research": research, "robustness": robust, "scenarios": rows}
