@@ -1,6 +1,6 @@
 from __future__ import annotations
 import json
-from app.models.entities import PortfolioSnapshot,BacktestRun,StrategyVersion,JobRun
+from app.models.entities import PortfolioSnapshot,BacktestRun,StrategyVersion,JobRun,SystemState
 from app.services.broker import PaperBrokerService
 
 def snapshot_paper(db):
@@ -43,14 +43,23 @@ def compare_paper_backtest(db):
 def promotion_gate(db,strategy_id:int):
     strategy=db.get(StrategyVersion,strategy_id)
     if not strategy:return None
-    v=db.query(JobRun).filter(JobRun.kind=="VALIDATION",JobRun.status=="COMPLETED").order_by(JobRun.id.desc()).first()
-    result={}
-    if v:
-        try:result=json.loads(v.result_json or "{}")
-        except Exception:result={}
+    result={};source=None
+    state=db.query(SystemState).filter(SystemState.key=="validation.latest").first()
+    if state:
+        try:
+            result=json.loads(state.value_json or "{}");source="autopilot"
+        except Exception:
+            result={}
+    if not result:
+        v=db.query(JobRun).filter(JobRun.kind=="VALIDATION",JobRun.status=="COMPLETED").order_by(JobRun.id.desc()).first()
+        if v:
+            try:
+                result=json.loads(v.result_json or "{}");source=v.job_key
+            except Exception:
+                result={}
     checks=[
-        {"name":"validation_completed","ok":v is not None,"detail":None if not v else v.job_key},
+        {"name":"validation_completed","ok":bool(result),"detail":source},
         {"name":"validation_passed","ok":bool(result.get("passed")),"detail":result.get("passed")},
         {"name":"paper_eligible","ok":bool(result.get("paper_eligible")),"detail":result.get("checks",[])},
     ]
-    return {"strategy_id":strategy_id,"passed":all(x["ok"] for x in checks),"checks":checks}
+    return {"strategy_id":strategy_id,"passed":all(x["ok"] for x in checks),"checks":checks,"validation_source":source}
