@@ -206,8 +206,13 @@ def universe(force=False):
     if os.path.exists(path) and not force and pd.Timestamp.now().timestamp()-os.path.getmtime(path)<24*3600:
         try:
             with open(path,encoding="utf-8") as fh:
-                syms=json.load(fh).get("symbols",[])
-            if syms:
+                cached=json.load(fh)
+            syms=cached.get("symbols",[])
+            if (
+                syms
+                and cached.get("mode")=="quality_liquid_v2"
+                and int(cached.get("requested_size",0))==int(settings.real_universe_size)
+            ):
                 return syms[:settings.real_universe_size]
         except (OSError,ValueError,TypeError):
             pass
@@ -224,7 +229,7 @@ def universe(force=False):
 
     tmp=path+".tmp"
     with open(tmp,"w",encoding="utf-8") as fh:
-        json.dump({"date":date.today().isoformat(),"mode":"quality_liquid_v2","symbols":syms},fh)
+        json.dump({"date":date.today().isoformat(),"mode":"quality_liquid_v2","requested_size":int(settings.real_universe_size),"symbols":syms},fh)
     os.replace(tmp,path)
     return syms
 
