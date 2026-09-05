@@ -274,3 +274,14 @@ def test_backtest_starts_at_first_available_signal_instead_of_hidden_260_day_ski
     assert result["position_ledger"]
     assert pd.Timestamp(result["position_ledger"][0]["signal_date"])==dates[0]
     assert pd.Timestamp(result["position_ledger"][0]["entry_date"])==dates[1]
+
+
+def test_backtest_request_accepts_long_only_v5():
+    from app.main import BacktestRequest
+    req=BacktestRequest(long_count=15,short_count=0,rebalance_days=10,gross_exposure=1)
+    assert req.short_count==0
+
+def test_alpaca_history_defaults_to_2016(monkeypatch):
+    from app.services import real_data
+    monkeypatch.setattr(real_data.settings,"real_history_start","2016-01-01")
+    assert real_data._requested_history_start()=="2016-01-01"
