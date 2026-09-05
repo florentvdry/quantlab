@@ -148,7 +148,7 @@ def execute_job(key:str):
         elif row.kind=="META_V5":
             def progress_v5(value,message):
                 update(db,row,progress=value,result_json=safe_dumps({"message":message}))
-            update(db,row,progress=10,result_json=safe_dumps({"message":"META V5 — nested walk-forward initialisation"}))
+            update(db,row,progress=10,result_json=safe_dumps({"message":"META V5 — continuous walk-forward initialisation"}))
             result=run_meta_v5(params=p,progress=progress_v5)
             result["backtest_id"]=_persist_backtest(db,result)
             result["model_version_id"]=_persist_meta_v5_model(db,result)
