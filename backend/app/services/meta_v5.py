@@ -194,11 +194,13 @@ def _new_base_models():
     }
 
 
-def _fit_base(train: pd.DataFrame):
+def _fit_base(train: pd.DataFrame, stage_progress: Callable[[str], None] | None = None):
     x = train[MODEL_FEATURES].fillna(0.5)
     y = train["future_relative_20d"].astype(float)
     models = _new_base_models()
-    for model in models.values():
+    for name,model in models.items():
+        if stage_progress:
+            stage_progress(name)
         model.fit(x, y)
     return models
 
@@ -481,14 +483,26 @@ def build_meta_v5_oos(
                 )
 
             # The validation slice is itself strictly OOS relative to base_train.
-            validation_models = _fit_base(base_train)
+            def validation_stage(name):
+                if progress:
+                    progress(
+                        min(74,pct),
+                        f"META V5 {pd.Timestamp(signal_date).date()} — {refresh_id}/{refresh_total} · validation · {name}",
+                    )
+            validation_models = _fit_base(base_train,stage_progress=validation_stage)
             val_pred = _predict_base(validation_models, validation)
             router, router_diag = _router_weights(val_pred)
             val_pred = _blend(val_pred, router)
             meta = _fit_meta_layer(val_pred)
 
             # Live model sees every target whose 20d outcome is knowable at signal_date.
-            live_models = _fit_base(safe_train)
+            def live_stage(name):
+                if progress:
+                    progress(
+                        min(74,pct),
+                        f"META V5 {pd.Timestamp(signal_date).date()} — {refresh_id}/{refresh_total} · live · {name}",
+                    )
+            live_models = _fit_base(safe_train,stage_progress=live_stage)
 
             if refreshes:
                 refreshes[-1]["test_to"] = str(pd.Timestamp(all_dates[date_i - 1]).date())
