@@ -604,8 +604,8 @@ def test_feature_solid_eligibility_is_point_in_time_and_maturity_gated(monkeypat
 
     monkeypatch.setattr(features.settings,"real_universe_min_price",10.0)
     monkeypatch.setattr(features.settings,"real_trade_min_history_sessions",5)
-    monkeypatch.setattr(features.settings,"real_universe_min_median_dollar_volume",1.0)
-    monkeypatch.setattr(features.settings,"real_universe_max_volatility",2.0)
+    monkeypatch.setattr(features.settings,"real_trade_min_median_dollar_volume",1.0)
+    monkeypatch.setattr(features.settings,"real_trade_max_volatility",2.0)
 
     dates=pd.bdate_range("2026-01-02",periods=70)
     df=pd.DataFrame({
@@ -618,3 +618,63 @@ def test_feature_solid_eligibility_is_point_in_time_and_maturity_gated(monkeypat
     out=features._technical(df)
     assert not bool(out.iloc[34]["solid_eligible"])
     assert bool(out.iloc[-1]["solid_eligible"])
+
+
+def test_current_universe_size_gate_does_not_require_current_profit(monkeypatch):
+    from app.services import real_data
+
+    class FakeSettings:
+        real_universe_min_sec_core_metrics=3
+        real_universe_min_revenue=1_000_000_000.0
+        real_universe_min_assets=5_000_000_000.0
+
+    # Reuse the real settings object fields through monkeypatch.
+    monkeypatch.setattr(real_data.settings,"real_universe_min_sec_core_metrics",3)
+    monkeypatch.setattr(real_data.settings,"real_universe_min_revenue",1_000_000_000.0)
+    monkeypatch.setattr(real_data.settings,"real_universe_min_assets",5_000_000_000.0)
+
+    def fake_events(symbol):
+        values={
+            "revenue":2_000_000_000.0,
+            "net_income":-250_000_000.0,
+            "assets":12_000_000_000.0,
+            "equity":4_000_000_000.0,
+            "operating_cf":-100_000_000.0,
+        }
+        return pd.DataFrame([
+            {
+                "symbol":symbol,
+                "metric":metric,
+                "value":value,
+                "period_end":pd.Timestamp("2025-12-31"),
+                "available_at":pd.Timestamp("2026-02-15"),
+            }
+            for metric,value in values.items()
+        ])
+
+    import app.services.sec_fundamentals as sf
+    monkeypatch.setattr(sf,"fundamental_events",fake_events)
+    row=real_data._sec_operating_quality(["BIGCO"]).iloc[0]
+    assert bool(row["sec_operating_company"])
+    assert not bool(row["sec_earning_power"])
+    assert bool(row["sec_size_ok"])
+
+
+def test_point_in_time_solid_gate_uses_size_not_profit(monkeypatch):
+    from app.services import sec_fundamentals as sf
+
+    monkeypatch.setattr(sf.settings,"real_universe_min_sec_core_metrics",3)
+    monkeypatch.setattr(sf.settings,"real_universe_min_revenue",1_000_000_000.0)
+    monkeypatch.setattr(sf.settings,"real_universe_min_assets",5_000_000_000.0)
+
+    dates=pd.DatetimeIndex([pd.Timestamp("2026-03-01")])
+    events=pd.DataFrame([
+        {"symbol":"BIGCO","metric":"revenue","value":2_000_000_000.0,"period_end":pd.Timestamp("2025-12-31"),"available_at":pd.Timestamp("2026-02-15")},
+        {"symbol":"BIGCO","metric":"net_income","value":-300_000_000.0,"period_end":pd.Timestamp("2025-12-31"),"available_at":pd.Timestamp("2026-02-15")},
+        {"symbol":"BIGCO","metric":"assets","value":10_000_000_000.0,"period_end":pd.Timestamp("2025-12-31"),"available_at":pd.Timestamp("2026-02-15")},
+        {"symbol":"BIGCO","metric":"equity","value":4_000_000_000.0,"period_end":pd.Timestamp("2025-12-31"),"available_at":pd.Timestamp("2026-02-15")},
+        {"symbol":"BIGCO","metric":"operating_cf","value":-50_000_000.0,"period_end":pd.Timestamp("2025-12-31"),"available_at":pd.Timestamp("2026-02-15")},
+    ])
+    monkeypatch.setattr(sf,"fundamental_events",lambda symbol,force=False:events)
+    panel=sf.point_in_time_panel(["BIGCO"],dates)
+    assert bool(panel.iloc[0]["solid_fundamental_eligible"])
