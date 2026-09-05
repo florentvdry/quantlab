@@ -35,10 +35,20 @@ def _get_json(url:str, host_data=True):
 
 def ticker_map(force=False):
     p=CACHE/'ticker_map.json'
-    if p.exists() and not force and time.time()-p.stat().st_mtime<7*86400: return json.loads(p.read_text())
-    raw=_get_json(TICKERS_URL,host_data=False)
-    out={v['ticker'].upper():{'cik':str(v['cik_str']).zfill(10),'title':v['title']} for v in raw.values()}
-    p.write_text(json.dumps(out)); return out
+    if p.exists() and not force and time.time()-p.stat().st_mtime<7*86400:
+        try:return json.loads(p.read_text())
+        except Exception:pass
+    try:
+        raw=_get_json(TICKERS_URL,host_data=False)
+        out={v['ticker'].upper():{'cik':str(v['cik_str']).zfill(10),'title':v['title']} for v in raw.values()}
+        tmp=p.with_suffix('.tmp');tmp.write_text(json.dumps(out));os.replace(tmp,p)
+        return out
+    except Exception as exc:
+        _LAST_DIAGNOSTICS['errors']['ticker_map']=str(exc)
+        if p.exists():
+            try:return json.loads(p.read_text())
+            except Exception:pass
+        return {}
 
 def companyfacts(symbol:str, force=False):
     mp=ticker_map(); item=mp.get(symbol.upper().replace('.','-')) or mp.get(symbol.upper())
@@ -98,7 +108,7 @@ def point_in_time_panel(symbols, dates, force=False):
     for symbol in symbols:
         try:
             ev=fundamental_events(symbol,force)
-        except httpx.HTTPError as exc:
+        except Exception as exc:
             _LAST_DIAGNOSTICS['errors'][symbol.upper()]=str(exc)
             ev=pd.DataFrame(columns=['symbol','metric','value','period_end','available_at'])
         base=pd.DataFrame({'date':dates})
