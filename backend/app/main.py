@@ -19,8 +19,9 @@ from app.services.jobs import enqueue
 from app.services.monitoring import snapshot_paper,paper_history,compare_paper_backtest,promotion_gate
 from app.services.app_snapshot import build_app_snapshot
 from app.services.external_http import ExternalServiceError
+from app.services.json_utils import StrictJSONResponse
 
-app=FastAPI(title="Quant Lab",version="1.3.0")
+app=FastAPI(title="Quant Lab",version="1.3.0",default_response_class=StrictJSONResponse)
 app.add_middleware(CORSMiddleware,allow_origins=["http://localhost:3000","http://127.0.0.1:3000"],allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
 
 @app.on_event("startup")
@@ -28,11 +29,11 @@ def startup(): Base.metadata.create_all(bind=engine)
 
 @app.exception_handler(ExternalServiceError)
 async def external_service_error_handler(_:Request,exc:ExternalServiceError):
-    return JSONResponse(status_code=502,content={"detail":{"code":"EXTERNAL_SERVICE_ERROR","service":exc.service,"message":str(exc)}})
+    return StrictJSONResponse(status_code=502,content={"detail":{"code":"EXTERNAL_SERVICE_ERROR","service":exc.service,"message":str(exc)}})
 
 @app.exception_handler(RuntimeError)
 async def runtime_error_handler(_:Request,exc:RuntimeError):
-    return JSONResponse(status_code=503,content={"detail":{"code":"RUNTIME_DEPENDENCY_ERROR","message":str(exc)}})
+    return StrictJSONResponse(status_code=503,content={"detail":{"code":"RUNTIME_DEPENDENCY_ERROR","message":str(exc)}})
 
 class BacktestRequest(BaseModel):
     long_count:int=Field(20,ge=1,le=50);short_count:int=Field(20,ge=1,le=50);rebalance_days:int=Field(5,ge=1,le=21)
@@ -54,7 +55,7 @@ def ready(db:Session=Depends(get_db)):
     except Exception as e: checks["postgres"]=str(e)
     try: checks["redis"]=bool(Redis.from_url(settings.redis_url).ping())
     except Exception as e: checks["redis"]=str(e)
-    return JSONResponse(status_code=200 if all(v is True for v in checks.values()) else 503,content={"ready":all(v is True for v in checks.values()),"checks":checks})
+    return StrictJSONResponse(status_code=200 if all(v is True for v in checks.values()) else 503,content={"ready":all(v is True for v in checks.values()),"checks":checks})
 
 @app.get("/api/app/snapshot")
 def app_snapshot(db:Session=Depends(get_db)):return build_app_snapshot(db)
