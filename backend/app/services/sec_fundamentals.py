@@ -146,7 +146,10 @@ def point_in_time_panel(symbols, dates, force=False):
         &assets.gt(0)
         &equity.gt(0)
         &(revenue.gt(0)|net_income.notna())
-        &(net_income.gt(0)|operating_cf.gt(0))
+        &(
+            revenue.ge(float(settings.real_universe_min_revenue))
+            |assets.ge(float(settings.real_universe_min_assets))
+        )
     ).fillna(False)
 
     # Composite deliberately excludes valuation until historical shares/market-cap alignment is complete.
