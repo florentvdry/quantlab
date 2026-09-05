@@ -2,6 +2,8 @@ from __future__ import annotations
 import json, os, time
 from pathlib import Path
 import httpx, numpy as np, pandas as pd
+
+_LAST_DIAGNOSTICS={'not_found':set(),'errors':{}}
 from app.core.config import settings
 
 CACHE=Path('/data/sec'); CACHE.mkdir(parents=True,exist_ok=True)
@@ -40,10 +42,26 @@ def ticker_map(force=False):
 
 def companyfacts(symbol:str, force=False):
     mp=ticker_map(); item=mp.get(symbol.upper().replace('.','-')) or mp.get(symbol.upper())
-    if not item:return None
-    p=CACHE/f"{item['cik']}.json"
+    if not item:
+        _LAST_DIAGNOSTICS['not_found'].add(symbol.upper())
+        return None
+    p=CACHE/f"{item['cik']}.json";missing=CACHE/f"{item['cik']}.missing"
+    if missing.exists() and not force and time.time()-missing.stat().st_mtime<86400:
+        _LAST_DIAGNOSTICS['not_found'].add(symbol.upper())
+        return None
     if p.exists() and not force and time.time()-p.stat().st_mtime<7*86400:return json.loads(p.read_text())
-    j=_get_json(f"{BASE}/api/xbrl/companyfacts/CIK{item['cik']}.json")
+    try:
+        j=_get_json(f"{BASE}/api/xbrl/companyfacts/CIK{item['cik']}.json")
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code==404:
+            missing.write_text(json.dumps({"symbol":symbol.upper(),"cik":item['cik'],"checked_at":pd.Timestamp.utcnow().isoformat()}))
+            _LAST_DIAGNOSTICS['not_found'].add(symbol.upper())
+            return None
+        _LAST_DIAGNOSTICS['errors'][symbol.upper()]=f"HTTP {exc.response.status_code}"
+        raise
+    if missing.exists():
+        try:missing.unlink()
+        except OSError:pass
     p.write_text(json.dumps(j)); time.sleep(.11); return j
 
 def _units_for(fact):
@@ -75,9 +93,14 @@ def fundamental_events(symbol:str, force=False):
     return df
 
 def point_in_time_panel(symbols, dates, force=False):
+    _LAST_DIAGNOSTICS['not_found'].clear();_LAST_DIAGNOSTICS['errors'].clear()
     dates=pd.DatetimeIndex(pd.to_datetime(dates)).sort_values().unique(); parts=[]
     for symbol in symbols:
-        ev=fundamental_events(symbol,force)
+        try:
+            ev=fundamental_events(symbol,force)
+        except httpx.HTTPError as exc:
+            _LAST_DIAGNOSTICS['errors'][symbol.upper()]=str(exc)
+            ev=pd.DataFrame(columns=['symbol','metric','value','period_end','available_at'])
         base=pd.DataFrame({'date':dates})
         if ev.empty:
             base['symbol']=symbol; parts.append(base); continue
@@ -106,3 +129,13 @@ def point_in_time_panel(symbols, dates, force=False):
     .replace([np.inf, -np.inf], np.nan)
 )
     return out
+
+
+def diagnostics():
+    return {
+        "not_found":sorted(_LAST_DIAGNOSTICS["not_found"]),
+        "not_found_count":len(_LAST_DIAGNOSTICS["not_found"]),
+        "errors":dict(_LAST_DIAGNOSTICS["errors"]),
+        "error_count":len(_LAST_DIAGNOSTICS["errors"]),
+        "policy":"best_effort",
+    }
