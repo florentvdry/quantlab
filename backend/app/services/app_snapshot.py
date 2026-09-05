@@ -12,6 +12,7 @@ from app.services.broker import PaperBrokerService
 from app.services.dataset_state import get_state,states
 from app.services.features import feature_store_status
 from app.services.monitoring import compare_paper_backtest,paper_history
+from app.services.json_utils import json_safe
 
 
 def _loads(value,default):
@@ -107,7 +108,7 @@ def build_app_snapshot(db):
         if key in all_states:
             datasets[key]=all_states[key]
 
-    return {
+    snapshot={
         "version":"1.3.0",
         "mode":"PAPER",
         "system":{
@@ -145,3 +146,4 @@ def build_app_snapshot(db):
             "performance":{"history":paper_history(db,250),"comparison":compare_paper_backtest(db)},
         },
     }
+    return json_safe(snapshot)
