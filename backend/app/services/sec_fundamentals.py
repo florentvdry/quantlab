@@ -6,7 +6,7 @@ import httpx, numpy as np, pandas as pd
 _LAST_DIAGNOSTICS={'not_found':set(),'errors':{}}
 from app.core.config import settings
 
-CACHE=Path('/data/sec'); CACHE.mkdir(parents=True,exist_ok=True)
+CACHE=Path(os.getenv('QUANTLAB_DATA_DIR','/data'))/'sec'; CACHE.mkdir(parents=True,exist_ok=True)
 BASE='https://data.sec.gov'
 TICKERS_URL='https://www.sec.gov/files/company_tickers.json'
 
