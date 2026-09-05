@@ -31,6 +31,11 @@ jobs:
           QUANTLAB_DATA_DIR: /tmp/quantlab
         run: python -m pytest -q
 
+      - name: Build backend Docker image
+        run: docker build -t quantlab-backend-ci ./backend
+      - name: Smoke-test LightGBM inside backend image
+        run: docker run --rm -e DATA_MODE=synthetic quantlab-backend-ci python -c "import lightgbm; import app.main; print('docker-lightgbm-smoke-ok')"
+
   frontend:
     runs-on: ubuntu-latest
     steps:
