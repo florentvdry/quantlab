@@ -34,11 +34,10 @@ class PaperBrokerService:
         if not self.alpaca_enabled():
             return [{"symbol":p.symbol,"side":p.side,"notional":p.notional,"weight":p.weight,"score":p.score} for p in self.db.query(PaperPosition).all()]
         account=self.sync_account();equity=max(float(account["equity"]),1e-9);remote=self._alpaca_positions()
-        target_scores={t["symbol"]:t["score"] for t in self.target_portfolio(20)}
         self.db.query(PaperPosition).delete();rows=[]
         for p in remote:
-            mv=float(p.get("market_value") or 0);side="LONG" if float(p.get("qty") or 0)>=0 else "SHORT";weight=mv/equity
-            row=PaperPosition(symbol=p["symbol"],side=side,notional=abs(mv),weight=weight,score=float(target_scores.get(p["symbol"],0)))
+            qty=float(p.get("qty") or 0);mv=float(p.get("market_value") or 0);side="LONG" if qty>=0 else "SHORT";weight=mv/equity
+            row=PaperPosition(symbol=p["symbol"],side=side,notional=abs(mv),weight=weight,score=0.0)
             self.db.add(row);rows.append({"symbol":row.symbol,"side":row.side,"notional":row.notional,"weight":row.weight,"score":row.score})
         self.db.commit();return rows
     def rebalance(self,n=20,execute=False):
