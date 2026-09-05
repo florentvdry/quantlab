@@ -74,3 +74,26 @@ def test_backtest_exposes_auditable_prices_and_orders():
     assert first["qty"]>0
     assert "net_pnl_usd" in first
     assert {o["action"] for o in r["order_ledger"]} & {"BUY","SHORT","SELL","COVER"}
+
+
+def test_walk_forward_uses_target_embargo():
+    from app.services.research import _walk_forward_scored
+    from app.services.features import FEATURES
+    dates=pd.bdate_range("2021-01-04",periods=760)
+    rows=[]
+    for si,s in enumerate(["A","B","C","D","E","F"]):
+        for i,d in enumerate(dates):
+            row={"date":d,"symbol":s,"sector":"Test","open":100+i*.01,"close":100+i*.01,
+                 "future_relative_20d":((si-2.5)/1000)+((i%17)-8)/10000}
+            for fi,f in enumerate(FEATURES):
+                row[f]=((si+fi+i)%100)/100
+            rows.append(row)
+    panel=pd.DataFrame(rows)
+    _,summary=_walk_forward_scored("ridge",panel,min_train_days=300,test_days=100,embargo_days=20)
+    all_dates=list(sorted(panel.date.unique()))
+    pos={d:i for i,d in enumerate(all_dates)}
+    assert summary["folds"]
+    for fold in summary["folds"]:
+        train_to=pd.Timestamp(fold["train_to"])
+        test_from=pd.Timestamp(fold["test_from"])
+        assert pos[test_from]-pos[train_to]>=20
