@@ -1,3 +1,10 @@
 import './globals.css'
-export const metadata={title:'Quant Lab V1',description:'Quant research, backtests and paper trading'}
-export default function RootLayout({children}){return <html lang="fr"><body>{children}</body></html>}
+
+export const metadata={
+  title:'QuantLab · Research OS',
+  description:'Quantitative research, validation and Alpaca Paper monitoring',
+}
+
+export default function RootLayout({children}){
+  return <html lang="fr"><body>{children}</body></html>
+}
