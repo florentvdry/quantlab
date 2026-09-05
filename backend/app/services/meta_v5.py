@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+import os
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -45,6 +47,8 @@ V5_CONFIG = {
     "ewma_span": 5,
     "meta_threshold_grid": [0.50, 0.55, 0.60, 0.65],
     "lgbm_members": 3,
+    "lgbm_member_timeout_seconds": 45,
+    "lgbm_threads": 4,
 }
 
 
@@ -56,11 +60,14 @@ class DoubleEnsembleLGBM:
     All reweighting/selection happens inside the training window.
     """
 
-    def __init__(self, members: int = 3, seed: int = 42):
+    def __init__(self, members: int = 3, seed: int = 42, member_timeout_seconds: int = 45, threads: int = 4):
         self.members = members
         self.seed = seed
+        self.member_timeout_seconds = max(5, int(member_timeout_seconds))
+        self.threads = max(1, min(int(threads), int(os.cpu_count() or 1)))
         self.models: list[object] = []
         self.feature_sets: list[list[str]] = []
+        self.fallback_reason: str | None = None
 
     def fit(self, x: pd.DataFrame, y: pd.Series):
         # Keep LightGBM optional at API import time. If its native runtime is ever
@@ -87,12 +94,36 @@ class DoubleEnsembleLGBM:
                 reg_alpha=0.15,
                 reg_lambda=2.0,
                 random_state=self.seed + k,
-                n_jobs=-1,
+                n_jobs=self.threads,
+                force_col_wise=True,
                 verbosity=-1,
             )
-            model.fit(x[features], y, sample_weight=weights)
-            self.models.append(model)
-            self.feature_sets.append(list(features))
+            started=time.monotonic()
+            timeout_seconds=self.member_timeout_seconds
+
+            def timeout_callback(env):
+                if time.monotonic()-started > timeout_seconds:
+                    raise TimeoutError(
+                        f"LightGBM member {k+1}/{self.members} exceeded {timeout_seconds}s"
+                    )
+            timeout_callback.order=0
+            timeout_callback.before_iteration=False
+
+            try:
+                model.fit(x[features], y, sample_weight=weights, callbacks=[timeout_callback])
+                self.models.append(model)
+                self.feature_sets.append(list(features))
+            except TimeoutError as exc:
+                self.fallback_reason=str(exc)
+                if self.models:
+                    break
+                # A timed-out first member must never block the whole research
+                # pipeline. Fall back to a cheap deterministic linear learner.
+                fallback=make_pipeline(StandardScaler(),Ridge(alpha=20.0))
+                fallback.fit(x[features],y,sample_weight=weights)
+                self.models.append(fallback)
+                self.feature_sets.append(list(features))
+                break
 
             pred = model.predict(x[features])
             train_pred = (train_pred * k + pred) / (k + 1)
@@ -117,6 +148,9 @@ class DoubleEnsembleLGBM:
         return {
             "members": len(self.models),
             "feature_sets": self.feature_sets,
+            "threads": self.threads,
+            "member_timeout_seconds": self.member_timeout_seconds,
+            "fallback_reason": self.fallback_reason,
         }
 
 
@@ -149,9 +183,14 @@ def _new_base_models():
         "ridge": make_pipeline(StandardScaler(), Ridge(alpha=10.0)),
         "hgb": HistGradientBoostingRegressor(
             max_iter=140, max_depth=4, learning_rate=0.05,
-            l2_regularization=1.5, min_samples_leaf=50, random_state=42
+            l2_regularization=1.5, min_samples_leaf=50, random_state=42,
+            early_stopping=True, validation_fraction=0.10, n_iter_no_change=12
         ),
-        "lgbm": DoubleEnsembleLGBM(members=V5_CONFIG["lgbm_members"]),
+        "lgbm": DoubleEnsembleLGBM(
+            members=V5_CONFIG["lgbm_members"],
+            member_timeout_seconds=V5_CONFIG["lgbm_member_timeout_seconds"],
+            threads=V5_CONFIG["lgbm_threads"],
+        ),
     }
 
 
