@@ -6,6 +6,7 @@ from decimal import Decimal
 from numbers import Real
 
 import numpy as np
+from starlette.responses import JSONResponse
 
 
 def json_safe(value):
@@ -44,3 +45,15 @@ def safe_dumps(value, **kwargs):
     kwargs.setdefault("default", str)
     kwargs["allow_nan"]=False
     return json.dumps(json_safe(value), **kwargs)
+
+
+class StrictJSONResponse(JSONResponse):
+    def render(self, content) -> bytes:
+        return json.dumps(
+            json_safe(content),
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
