@@ -19,12 +19,15 @@ jobs:
         run: pip install -r backend/requirements.txt
       - name: Compile Python
         working-directory: backend
+        env:
+          PYTHONPATH: .
         run: python -m compileall -q app tests
       - name: Quant regression tests
         working-directory: backend
         env:
           DATA_MODE: synthetic
-        run: pytest -q
+          PYTHONPATH: .
+        run: python -m pytest -q
 
   frontend:
     runs-on: ubuntu-latest
