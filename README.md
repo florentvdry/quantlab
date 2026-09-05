@@ -1,8 +1,8 @@
-# QuantLab V1.1
+# QuantLab V1.2
 
 Plateforme locale de recherche quantitative sur actions US : **Data → Feature Store → Factor Research → Backtest → Walk-forward → Robustness → Validation → Alpaca Paper**.
 
-> **Aucun chemin Live Trading n'est implémenté.** La V1.1 s'arrête volontairement à Alpaca PAPER.
+> **Aucun chemin Live Trading n'est implémenté.** La V1.2 s'arrête volontairement à Alpaca PAPER.
 
 ## Démarrage Windows / PowerShell
 
@@ -74,10 +74,10 @@ Les credentials doivent être ceux d'**Alpaca Paper**. Ne publie jamais tes clé
 1. **Overview** — vérifier Setup / Readiness.
 2. **Data** — lancer `Daily Pipeline`, vérifier Market Data, SEC et Data Quality.
 3. **Research** — inspecter Rank IC, IC IR, ratio d'IC positifs et spread Top-Bottom.
-4. **Models** — entraîner Ridge / HGB avec walk-forward temporel.
-5. **Backtests** — comparer META US v2 à la baseline Momentum 12-1.
-6. **Validation** — lancer le Validation Gate complet.
-7. **Signals** — inspecter le ranking courant et l'explication par ticker.
+4. **Models** — lancer META Ensemble V5 et comparer Ridge / HGB.
+5. **Backtests** — comparer META V5, V4, META V2 et Momentum.
+6. **Validation** — lancer le Validation Gate complet ; le candidat est META V5.
+7. **Signals** — générer le snapshot META V5 TRADE / SKIP puis inspecter les probabilités et tailles.
 8. **Paper** — seulement après validation/promotion ; commencer par Preview / Risk Gate.
 
 ## Anti-lookahead
@@ -102,12 +102,38 @@ Familles principales :
 - liquidité dollar-volume ;
 - fondamentaux SEC point-in-time ;
 - earnings EPS point-in-time ;
-- score news ;
+- score news courant uniquement ; aucun score news récent n'est recopié dans l'historique ;
 - normalisation cross-sectionnelle en percentiles ;
 - Meta Score.
 
 Chaque backtest V2 contient la provenance du dataset : mode, feed, schéma de features, période, nombre de lignes/symboles et fingerprint.
 
+## META Ensemble V5
+
+META V5 est la couche de recherche principale. Elle évite le simple ajustement manuel de poids après observation du backtest.
+
+```text
+Ridge --------------\
+HGB -----------------+--> blend RankIC --> regime router --> EWMA --> meta-labeler --> sizing
+LightGBM x3 ---------+
+Momentum ------------/
+```
+
+Principes :
+
+- nested walk-forward : base-train -> embargo -> validation -> embargo -> test ;
+- target principale : rendement relatif cross-sectionnel à 20 jours ;
+- LightGBM DoubleEnsemble-style : sous-modèles successifs, reweighting des exemples difficiles et feature subsets ;
+- poids du blend estimés uniquement sur la validation historique ;
+- router simplifié : TREND_UP, NEUTRAL, HIGH_VOL, RISK_OFF ;
+- EWMA one-sided du score pour réduire les changements de rang et le turnover ;
+- meta-labeler logistique : TRADE / SKIP ;
+- calibration Platt sur une fenêtre tenue à l'écart avec embargo ;
+- sizing probabiliste ; V5 peut volontairement garder du cash ;
+- historique news exclu tant qu'un vrai historique point-in-time n'existe pas ;
+- snapshot de signal courant : LOCKED_RESEARCH_SIGNAL_ONLY.
+
+LightGBM est épinglé à 4.7.0.
 ## Backtest V2
 
 Le portefeuille est Top/Bottom cross-sectionnel long/short. Paramètres :
@@ -129,16 +155,18 @@ Une baseline **Momentum 12-1** est disponible et doit être comparée au Meta Sc
 
 ## Robustness / Validation Gate
 
-Le Validation Gate ne passe que si les contrôles essentiels passent :
+Le Validation Gate V5 ne passe que si les contrôles essentiels passent :
 
 - Data Quality ;
 - provenance du dataset ;
 - exécution next-open ;
-- Sharpe positif ;
-- Rank IC positif ;
-- walk-forward OOS positif ;
-- drawdown borné ;
-- Meta >= baseline ;
+- Sharpe >= 0,75 ;
+- CAGR >= 5 % ;
+- OOS Rank IC >= 0,02 et stabilité des folds ;
+- drawdown >= -25 % ;
+- excess CAGR > benchmark equal-weight ;
+- turnover moyen <= 35 % ;
+- meta-filter non dégénéré ;
 - robustesse de paramètres ;
 - coûts x2/x3 encore acceptables.
 
@@ -220,6 +248,9 @@ Cela doit notamment empêcher qu'une erreur JSX comme une accolade manquante soi
 - `GET /api/research/factors`
 - `POST /api/jobs/train/ridge`
 - `POST /api/jobs/train/hgb`
+- `POST /api/jobs/meta-v5`
+- `POST /api/jobs/meta-v5-signals`
+- `GET /api/meta-v5/signals`
 - `POST /api/jobs/backtest`
 - `POST /api/jobs/baseline`
 - `POST /api/jobs/robustness`
@@ -232,11 +263,11 @@ Cela doit notamment empêcher qu'une erreur JSX comme une accolade manquante soi
 - `POST /api/paper/kill/cancel-orders`
 - `POST /api/paper/kill/flatten?confirm=FLATTEN_PAPER`
 
-## Limites V1.1
+## Limites V1.2
 
 - Univers réel volontairement encore limité / curated avant montée en charge.
 - Feed Alpaca configurable ; IEX n'est pas l'intégralité du marché US.
-- Le score news reste heuristique.
+- Le score news courant reste heuristique et n'est pas utilisé historiquement sans archive point-in-time.
 - Aucun modèle ne garantit une performance future.
 - Paper Trading est une simulation et ne reproduit pas parfaitement l'exécution réelle.
 - **Live Trading : non implémenté.**
