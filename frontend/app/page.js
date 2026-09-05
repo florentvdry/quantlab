@@ -1,306 +1,122 @@
 'use client'
-import {useEffect,useMemo,useState} from 'react'
-import {LineChart,Line,XAxis,YAxis,Tooltip,ResponsiveContainer} from 'recharts'
+
+import { useEffect, useMemo, useState } from 'react'
+import { JobBanner } from './components/ui'
+import { ErrorBanner, JOB_LABELS, LoadingScreen, TopNav } from './components/shell'
+import { DashboardView, ResearchView, SignalDrawer, SignalsView } from './components/views-main'
+import { BacktestsView } from './components/views-backtests'
+import { PaperView, SystemView } from './components/views-ops'
 
 const API=process.env.NEXT_PUBLIC_API_URL||'http://localhost:8000'
-const pct=v=>v==null?'—':(Number(v)*100).toFixed(1)+'%'
-const num=(v,d=3)=>v==null?'—':Number(v).toFixed(d)
-const JOB_LABELS={
-  AUTO_BOOTSTRAP:'Autopilot QuantLab',BACKTEST:'META V2 Backtest',META_V5:'META Ensemble V5',V4_BACKTEST:'META V4 Low-Turnover',ADAPTIVE_BACKTEST:'Adaptive META V3',BASELINE:'Baseline momentum',SWEEP:'Parameter sweep',ROBUSTNESS:'Robustness',
-  TRAIN_RIDGE:'Walk-forward Ridge',TRAIN_HGB:'Walk-forward HGB',FACTOR_SUMMARY:'Factor Research',
-  VALIDATION:'Validation Gate',META_V5_SIGNALS:'META V5 Signals',RIDGE_BACKTEST:'Ridge OOS Backtest',HGB_BACKTEST:'HGB OOS Backtest',DATA_REFRESH:'Market data',SEC_REFRESH:'SEC',DAILY_PIPELINE:'Daily Pipeline',
-  PAPER_SNAPSHOT:'Paper Snapshot'
-}
-const STATUS_LABELS={QUEUED:'En attente',RUNNING:'En cours',COMPLETED:'Terminé',FAILED:'Échec'}
 
-function Card({title,children,className=''}){return <section className={'card '+className}>{title&&<h3>{title}</h3>}{children}</section>}
-function Empty({children}){return <div className="empty">{children}</div>}
-function Pill({ok,children}){return <span className={'pill '+(ok?'completed':'failed')}>{children}</span>}
-function Metric({label,value,sub}){return <Card><div className="muted">{label}</div><div className="big">{value}</div>{sub&&<div className="muted mini">{sub}</div>}</Card>}
-
-export default function Home(){
-  const [tab,setTab]=useState('Overview')
-  const [loading,setLoading]=useState(true)
-  const [busy,setBusy]=useState(false)
-  const [msg,setMsg]=useState('')
-  const [msgType,setMsgType]=useState('info')
-  const [dash,setDash]=useState(null)
-  const [sys,setSys]=useState(null)
-  const [setup,setSetup]=useState(null)
-  const [jobs,setJobs]=useState([])
-  const [backtests,setBacktests]=useState([])
-  const [factors,setFactors]=useState([])
-  const [datasets,setDatasets]=useState({})
-  const [strategies,setStrategies]=useState([])
-  const [models,setModels]=useState([])
-  const [experiments,setExperiments]=useState([])
-  const [validation,setValidation]=useState(null)
-  const [quality,setQuality]=useState(null)
-  const [factorSummary,setFactorSummary]=useState(null)
-  const [clock,setClock]=useState(null)
-  const [positions,setPositions]=useState([])
-  const [orders,setOrders]=useState([])
-  const [fills,setFills]=useState([])
-  const [perf,setPerf]=useState(null)
-  const [preview,setPreview]=useState(null)
-  const [selectedSymbol,setSelectedSymbol]=useState(null)
-  const [explain,setExplain]=useState(null)
-  const [selectedBacktest,setSelectedBacktest]=useState(null)
-  const [metaSignals,setMetaSignals]=useState(null)
-  const [lastJobKey,setLastJobKey]=useState(null)
-  const [cfg,setCfg]=useState({long_count:20,short_count:20,rebalance_days:5,commission_bps:6,slippage_bps:5,gross_exposure:2,initial_capital:100000,adaptive_lookback_days:252})
-
-  const request=async(path,opt)=>{
-    const r=await fetch(API+path,opt)
+async function api(path,opt={},timeout=9000){
+  const controller=new AbortController()
+  const timer=setTimeout(()=>controller.abort(),timeout)
+  try{
+    const response=await fetch(API+path,{...opt,signal:controller.signal,cache:'no-store'})
     let body={}
-    try{body=await r.json()}catch{}
-    if(!r.ok){
-      const d=body?.detail
-      const m=typeof d==='string'?d:(d?.message||body?.message||JSON.stringify(d||body)||('HTTP '+r.status))
-      throw new Error(m)
+    try{body=await response.json()}catch{}
+    if(!response.ok){
+      const detail=body?.detail
+      const message=typeof detail==='string'?detail:(detail?.message||body?.message||'HTTP '+response.status)
+      throw new Error(message)
     }
     return body
+  }finally{
+    clearTimeout(timer)
   }
-
-  const load=async(silent=false)=>{
-    if(!silent)setLoading(true)
-    const calls=[
-      ['/api/dashboard',setDash],['/api/system/status',setSys],['/api/setup',setSetup],['/api/jobs',setJobs],
-      ['/api/backtests',setBacktests],['/api/factors/latest',setFactors],['/api/system/datasets',setDatasets],
-      ['/api/strategies',setStrategies],['/api/models',setModels],['/api/experiments',setExperiments],
-      ['/api/validation/latest',setValidation],['/api/data/quality',setQuality],['/api/research/factors/latest',setFactorSummary],['/api/meta-v5/signals',setMetaSignals],['/api/paper/positions',setPositions],
-      ['/api/paper/orders',setOrders],['/api/paper/fills',setFills],['/api/paper/performance',setPerf]
-    ]
-    try{
-      const values=await Promise.all(calls.map(([p])=>request(p).catch(e=>({__error:e.message}))))
-      values.forEach((v,i)=>{if(!v?.__error)calls[i][1](v)})
-      try{setClock(await request('/api/paper/clock'))}catch{}
-    }finally{if(!silent)setLoading(false)}
-  }
-
-  useEffect(()=>{load();const t=setInterval(()=>load(true),5000);return()=>clearInterval(t)},[])
-
-  const activeJobs=useMemo(()=>jobs.filter(j=>j.status==='QUEUED'||j.status==='RUNNING'),[jobs])
-  const latestActive=activeJobs[0]
-  const trackedJob=useMemo(()=>lastJobKey?jobs.find(j=>j.job_key===lastJobKey):null,[jobs,lastJobKey])
-  const displayJob=trackedJob||latestActive
-
-  const flash=(text,type='info')=>{setMsg(text);setMsgType(type)}
-  const postJob=async(path,label,body=cfg)=>{
-    flash(label+' — mise en file…','loading')
-    try{
-      const x=await request(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-      setLastJobKey(x.job_key)
-      flash(label+' ajouté à la file ('+x.job_key.slice(0,8)+')','success')
-      await load(true)
-    }catch(e){flash(label+' — '+e.message,'error')}
-  }
-  const direct=async(label,fn)=>{
-    setBusy(true);flash(label+'…','loading')
-    try{const r=await fn();flash(label+' terminé','success');await load(true);return r}
-    catch(e){flash(label+' — '+e.message,'error')}
-    finally{setBusy(false)}
-  }
-
-  const showExplain=async(symbol)=>{
-    setSelectedSymbol(symbol);setExplain(null)
-    try{setExplain(await request('/api/factors/'+encodeURIComponent(symbol)+'/explain'))}
-    catch(e){flash(e.message,'error')}
-  }
-  const openBacktest=async(id)=>{
-    setSelectedBacktest(null);setTab('Backtests')
-    try{setSelectedBacktest(await request('/api/backtests/'+id))}catch(e){flash(e.message,'error')}
-  }
-
-  if(loading&&!dash)return <main className="wrap"><div className="loadingScreen"><span className="spinner"/><h2>Chargement de Quant Lab…</h2><p className="muted">API, dataset, Feature Store et derniers résultats.</p></div></main>
-
-  const tabs=['Overview','Data','Research','Models','Backtests','Validation','Signals','Paper','System']
-  return <main className="wrap">
-    <header className="head">
-      <div><h1>Quant Lab <span className="muted">V1.2</span></h1><div className="muted">Data → Research → Validation → Strategy → Alpaca Paper</div></div>
-      <div className="headState"><b>{sys?.data_mode?.toUpperCase()}</b><span>/ PAPER</span><span className={sys?.paper_orders_enabled?'dangerText':'positive'}>{sys?.paper_orders_enabled?'ARMED':'LOCKED'}</span></div>
-    </header>
-
-    <nav className="tabs">{tabs.map(x=><button key={x} className={tab===x?'active':''} onClick={()=>setTab(x)}>{x}</button>)}</nav>
-
-    {(msg||displayJob)&&<div className={'statusBanner '+(displayJob?(displayJob.status==='FAILED'?'error':displayJob.status==='COMPLETED'?'success':'loading'):msgType)}>
-      {(displayJob&&(displayJob.status==='QUEUED'||displayJob.status==='RUNNING')||(!displayJob&&msgType==='loading'))&&<span className="spinner small"/>}
-      <div className="grow">
-        <b>{displayJob?(JOB_LABELS[displayJob.kind]||displayJob.kind)+' — '+(STATUS_LABELS[displayJob.status]||displayJob.status):msg}</b>
-        {displayJob&&<><div className={(displayJob.status==='FAILED'?'negative':'muted')+' mini'}>{displayJob.error||displayJob.message||('Progression '+displayJob.progress+'%')}</div><div className="progress"><span style={{width:Math.max(3,displayJob.progress||0)+'%'}}/></div></>}
-      </div>
-    </div>}
-
-    {setup&&!setup.research_unlocked&&<div className="statusBanner warning">
-      <div className="grow"><b>Autopilot prépare QuantLab</b><div className="muted mini">{setup.feature_store?.message||'Initialisation en cours.'} Tu n'as rien à lancer manuellement : Data → Research → META V5 → Validation → Signals s'enchaînent automatiquement.</div></div>
-    </div>}
-
-    {tab==='Overview'&&<>
-      <div className="grid">
-        <Metric label="Paper Equity" value={'$'+Number(dash?.broker?.equity||0).toLocaleString()} sub={dash?.broker?.provider}/>
-        <Metric label="Dernier Sharpe" value={dash?.last_backtest?.sharpe??'—'} sub={dash?.last_backtest?.dataset?.mode||'legacy'}/>
-        <Metric label="Validation" value={validation?.tier||'NOT RUN'} sub={validation?.passed?'Paper ready':'Research gate'}/>
-        <Metric label="Market" value={clock?.is_open?'OPEN':'CLOSED'} sub={clock?.next_open?('Next '+clock.next_open):''}/>
-      </div>
-      <div className="two section">
-        <Card title="Setup / Readiness">
-          {!setup?.steps?.length?<Empty>Aucun état de setup.</Empty>:setup.steps.map(s=><div className="checkRow" key={s.name}><Pill ok={s.ok}>{s.ok?'PASS':'BLOCK'}</Pill><div><b>{s.name}</b><div className="muted mini">{typeof s.detail==='string'?s.detail:''}</div></div></div>)}
-        </Card>
-        <Card title="Autopilot">
-          <div className="big">{sys?.auto_bootstrap_enabled?'ACTIVE':'OFF'}</div>
-          <p className="muted mini">Au démarrage et lors du refresh quotidien : market data → SEC best-effort → Feature Store → Factor Research → META V5 → Validation → Signals.</p>
-          <div className="row topGap"><button className="btn2" disabled={activeJobs.some(j=>j.kind==='AUTO_BOOTSTRAP')} onClick={()=>postJob('/api/jobs/bootstrap?force_market=true','Autopilot QuantLab',{})}>{activeJobs.some(j=>j.kind==='AUTO_BOOTSTRAP')?'Autopilot en cours…':'Refresh tout maintenant'}</button></div>
-          <p className="muted mini">Les boutons des autres onglets restent disponibles pour les expériences manuelles, mais ils ne sont plus nécessaires au chargement normal.</p>
-        </Card>
-      </div>
-      <Card title="Background Jobs" className="section"><JobsTable jobs={jobs}/></Card>
-    </>}
-
-    {tab==='Data'&&<>
-      <div className="two">
-        <Card title="Dataset / Feature Versions">
-          {!Object.keys(datasets||{}).length?<Empty>Autopilot prépare les datasets.</Empty>:<table><thead><tr><th>Layer</th><th>Version</th><th>Latest</th><th>Rows</th></tr></thead><tbody>{Object.entries(datasets).map(([k,v])=><tr key={k}><td>{k}</td><td>{v.version||v.status||'—'}</td><td>{v.latest||'—'}</td><td>{v.rows||'—'}</td></tr>)}</tbody></table>}
-        </Card>
-        <Card title="Data Quality">
-          {!quality?<Empty>Pas de rapport.</Empty>:<><div className="big">{quality.status}</div>{quality.status==='NOT_READY'&&<p className="muted mini">{quality.feature_store?.message||'Feature Store non prêt.'}</p>}{(quality.checks||[]).map(c=><div className="checkRow" key={c.name}><Pill ok={c.ok}>{c.ok?'PASS':'WARN'}</Pill><span>{c.name}</span></div>)}</>}
-        </Card>
-      </div>
-      <Card title="Data operations" className="section"><div className="row">
-        <button className="btn2" onClick={()=>postJob('/api/jobs/data-refresh','Market data refresh',{})}>Refresh Alpaca</button>
-        <button className="btn2" onClick={()=>postJob('/api/jobs/sec-refresh','SEC refresh',{})}>Refresh SEC</button>
-        <button className="btn" onClick={()=>postJob('/api/jobs/daily-pipeline?force_market=true&refresh_sec=true','Full Daily Pipeline',{})}>Full Pipeline</button>
-      </div></Card>
-    </>}
-
-    {tab==='Research'&&<>
-      <Card title="Factor Research">
-        <div className="row"><button className="btn2" onClick={()=>postJob('/api/jobs/factor-summary','Factor Research',{})}>Recalculer</button></div>
-        {!factorSummary?.factors?.length?<Empty>Autopilot calculera le rapport automatiquement.</Empty>:<table><thead><tr><th>Factor</th><th>Mean IC</th><th>IC IR</th><th>Positive IC</th><th>Top-Bottom 20D</th></tr></thead><tbody>{factorSummary.factors.map(f=><tr key={f.feature}><td>{f.feature}</td><td>{num(f.mean_rank_ic,4)}</td><td>{num(f.ic_ir,3)}</td><td>{pct(f.positive_ic_ratio)}</td><td>{pct(f.top_bottom_future_20d)}</td></tr>)}</tbody></table>}
-      </Card>
-      <Card title="Research rule" className="section"><p>Le score complexe doit être comparé à une baseline momentum simple et évalué hors échantillon. Un Sharpe in-sample positif ne suffit pas.</p></Card>
-    </>}
-
-    {tab==='Models'&&<>
-      <div className="two">
-        <Card title="META V5 / Walk-forward"><div className="actionGrid"><button className="btn" onClick={()=>postJob('/api/jobs/meta-v5','META Ensemble V5')}>Run META V5</button><button className="btn" onClick={()=>postJob('/api/jobs/train/ridge','Walk-forward Ridge',{})}>Train Ridge</button><button className="btn2" onClick={()=>postJob('/api/jobs/train/hgb','Walk-forward HGB',{})}>Train HGB</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/ridge','Ridge OOS Backtest')}>Backtest Ridge OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/hgb','HGB OOS Backtest')}>Backtest HGB OOS</button></div></Card>
-        <Card title="Model Registry">{!models.length?<Empty>Aucun modèle entraîné.</Empty>:<table><thead><tr><th>Model</th><th>Version</th><th>Status</th><th>OOS IC</th></tr></thead><tbody>{models.map(m=><tr key={m.id}><td>{m.name}</td><td>v{m.version}</td><td>{m.status}</td><td>{num(m.metrics?.oos_mean_rank_ic??m.metrics?.test_mean_rank_ic,4)}</td></tr>)}</tbody></table>}</Card>
-      </div>
-    </>}
-
-    {tab==='Backtests'&&<>
-      <Card title="Strategy Builder">
-        <div className="formGrid">{Object.entries(cfg).map(([k,v])=><label key={k}><span>{k}</span><input type="number" step="any" value={v} onChange={e=>setCfg({...cfg,[k]:Number(e.target.value)})}/></label>)}</div>
-        <div className="row topGap"><button className="btn" onClick={()=>postJob('/api/jobs/meta-v5','META Ensemble V5')}>Queue META V5</button><button className="btn2" onClick={()=>postJob('/api/jobs/v4-backtest','META V4 Low-Turnover',{})}>META V4</button><button className="btn2" onClick={()=>postJob('/api/jobs/adaptive-backtest','Adaptive META V3')}>Adaptive V3</button><button className="btn2" onClick={()=>postJob('/api/jobs/backtest','META V2')}>Queue META V2</button><button className="btn2" onClick={()=>postJob('/api/jobs/baseline','Momentum baseline')}>Queue Baseline</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/ridge','Ridge OOS Backtest')}>Ridge OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/hgb','HGB OOS Backtest')}>HGB OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/robustness','Robustness')}>Robustness V2</button><button className="btn2" onClick={()=>postJob('/api/jobs/sweep','Parameter Sweep',{base:cfg,grid:{long_count:[10,20,30],short_count:[10,20,30],rebalance_days:[5,10,21]}})}>Parameter Sweep</button></div>
-      </Card>
-      {selectedBacktest&&<Card title={selectedBacktest.strategy} className="section">
-        <div className="metricRow">
-          <span>Sharpe <b>{selectedBacktest.metrics?.sharpe}</b></span>
-          <span>CAGR <b>{pct(selectedBacktest.metrics?.cagr)}</b></span>
-          <span>Max DD <b>{pct(selectedBacktest.metrics?.max_drawdown)}</b></span>
-          <span>IC <b>{num(selectedBacktest.metrics?.mean_rank_ic_20d,4)}</b></span>
-          <span>Win rate <b>{pct(selectedBacktest.metrics?.win_rate)}</b></span>
-          <span>Profit factor <b>{num(selectedBacktest.metrics?.profit_factor,2)}</b></span><span>Avg turnover <b>{pct(selectedBacktest.metrics?.avg_turnover_per_rebalance)}</b></span>
-        </div>
-        <div className="metricRow topGap">
-          <span>Capital départ <b>{'$'+Number(selectedBacktest.metrics?.initial_capital_usd||0).toLocaleString()}</b></span>
-          <span>Capital fin <b>{'$'+Number(selectedBacktest.metrics?.ending_capital_usd||0).toLocaleString()}</b></span>
-          <span>P&L net <b className={(selectedBacktest.metrics?.net_pnl_usd||0)>=0?'positive':'negative'}>{'$'+Number(selectedBacktest.metrics?.net_pnl_usd||0).toLocaleString()}</b></span>
-          <span>Coûts <b>{'$'+Number(selectedBacktest.metrics?.estimated_costs_usd||0).toLocaleString()}</b></span>
-          <span>Long P&L <b>{'$'+Number(selectedBacktest.metrics?.long_pnl_usd||0).toLocaleString()}</b></span>
-          <span>Short P&L <b>{'$'+Number(selectedBacktest.metrics?.short_pnl_usd||0).toLocaleString()}</b></span>
-        </div>
-        <div className="datasetBadge">{selectedBacktest.dataset?.mode||'legacy'} · {(selectedBacktest.dataset?.backtest_from||selectedBacktest.dataset?.from||'?')} → {(selectedBacktest.dataset?.backtest_to||selectedBacktest.dataset?.to||'?')} · {selectedBacktest.dataset?.fingerprint||'no fingerprint'}</div>
-        {selectedBacktest.metrics?.benchmark_cagr!=null&&<div className="metricRow topGap"><span>Benchmark EW CAGR <b>{pct(selectedBacktest.metrics.benchmark_cagr)}</b></span><span>Benchmark Sharpe <b>{selectedBacktest.metrics.benchmark_sharpe}</b></span><span>Benchmark DD <b>{pct(selectedBacktest.metrics.benchmark_max_drawdown)}</b></span><span>Excess CAGR <b className={(selectedBacktest.metrics.excess_cagr_vs_equal_weight||0)>=0?'positive':'negative'}>{pct(selectedBacktest.metrics.excess_cagr_vs_equal_weight)}</b></span></div>}
-        <p className="muted mini">{selectedBacktest.audit_note||'Signal au close T, exécution au prochain open.'}</p>
-        {selectedBacktest.meta_v5&&<div className="resultNotice">
-          <b>META V5 OOS</b>
-          <div className="metricRow topGap">
-            <span>OOS Rank IC <b>{num(selectedBacktest.meta_v5.oos_mean_rank_ic,4)}</b></span>
-            <span>IC positif <b>{pct(selectedBacktest.meta_v5.positive_oos_ic_ratio)}</b></span>
-            <span>Signals acceptés <b>{pct(selectedBacktest.meta_v5.overall_acceptance_rate)}</b></span>
-            <span>Folds <b>{selectedBacktest.meta_v5.folds?.length||0}</b></span>
-          </div>
-          <p className="muted mini">Ridge + HGB + LightGBM ensemble + Momentum → router de régime → EWMA → meta-labeler calibré → sizing probabiliste.</p>
-        </div>}
-        <div className="chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={selectedBacktest.equity_curve||[]}><XAxis dataKey="date" minTickGap={45}/><YAxis domain={['auto','auto']}/><Tooltip/><Line dataKey="equity" dot={false}/></LineChart></ResponsiveContainer></div>
-        <h4>Ordres simulés ({selectedBacktest.order_ledger?.length||0})</h4>
-        {!selectedBacktest.order_ledger?.length?<Empty>Ancien backtest : relance un V2/V3 pour obtenir le journal détaillé.</Empty>:<div className="tableScroll"><table><thead><tr><th>Date</th><th>Symbole</th><th>Action</th><th>Prix</th><th>Qté</th><th>Notionnel</th><th>Coût</th></tr></thead><tbody>{selectedBacktest.order_ledger.slice(-250).reverse().map((o,i)=><tr key={o.rebalance_id+'-'+o.symbol+'-'+i}><td>{o.date}</td><td><b>{o.symbol}</b></td><td className={o.action==='BUY'||o.action==='COVER'?'positive':'negative'}>{o.action}</td><td>{'$'+num(o.price,2)}</td><td>{num(o.qty,3)}</td><td>{'$'+Number(o.notional_usd||0).toLocaleString()}</td><td>{'$'+num(o.estimated_cost_usd,2)}</td></tr>)}</tbody></table></div>}
-        <h4>Positions / P&L par période ({selectedBacktest.position_ledger?.length||0})</h4>
-        {!selectedBacktest.position_ledger?.length?<Empty>Pas de ledger disponible.</Empty>:<div className="tableScroll"><table><thead><tr><th>Signal</th><th>Entrée</th><th>Sortie</th><th>Symbole</th><th>Side</th><th>Rang</th><th>Score</th><th>Prix entrée</th><th>Prix sortie</th><th>Qté</th><th>Return</th><th>P&L brut</th><th>Coût</th><th>P&L net</th></tr></thead><tbody>{selectedBacktest.position_ledger.slice(-250).reverse().map((t,i)=><tr key={t.rebalance_id+'-'+t.symbol+'-'+i}><td>{t.signal_date}</td><td>{t.entry_date}</td><td>{t.exit_date}</td><td><b>{t.symbol}</b></td><td className={t.side==='LONG'?'positive':'negative'}>{t.side}</td><td>#{t.rank}</td><td>{num(t.signal_score,4)}</td><td>{'$'+num(t.entry_price,2)}</td><td>{'$'+num(t.exit_price,2)}</td><td>{num(t.qty,3)}</td><td>{pct(t.position_return??(t.side==='LONG'?t.asset_return:-t.asset_return))}</td><td className={(t.gross_pnl_usd||0)>=0?'positive':'negative'}>{'$'+num(t.gross_pnl_usd,2)}</td><td>{'$'+num(t.estimated_cost_usd,2)}</td><td className={(t.net_pnl_usd||0)>=0?'positive':'negative'}>{'$'+num(t.net_pnl_usd,2)}</td></tr>)}</tbody></table></div>}
-        <h4>Rebalances ({selectedBacktest.rebalance_ledger?.length||0})</h4>
-        {selectedBacktest.rebalance_ledger?.length>0&&<div className="tableScroll"><table><thead><tr><th>#</th><th>Signal</th><th>Entrée</th><th>Sortie</th><th>Turnover</th><th>Equity avant</th><th>P&L brut</th><th>Coûts</th><th>P&L net</th><th>Equity après</th></tr></thead><tbody>{selectedBacktest.rebalance_ledger.slice(-100).reverse().map(r=><tr key={r.rebalance_id}><td>#{r.rebalance_id}</td><td>{r.signal_date}</td><td>{r.entry_date}</td><td>{r.exit_date}</td><td>{pct(r.turnover)}</td><td>{'$'+Number(r.equity_before_usd||0).toLocaleString()}</td><td>{'$'+num(r.gross_pnl_usd,2)}</td><td>{'$'+num(r.cost_usd,2)}</td><td className={(r.net_pnl_usd||0)>=0?'positive':'negative'}>{'$'+num(r.net_pnl_usd,2)}</td><td>{'$'+Number(r.equity_after_usd||0).toLocaleString()}</td></tr>)}</tbody></table></div>}
-      </Card>}
-      <Card title="Backtest Registry" className="section">{!backtests.length?<Empty>Aucun backtest.</Empty>:<table><thead><tr><th>#</th><th>Strategy</th><th>Data</th><th>Period</th><th>CAGR</th><th>Sharpe</th><th>Max DD</th></tr></thead><tbody>{backtests.map(b=><tr key={b.id} className="clickable" onClick={()=>openBacktest(b.id)}><td>#{b.id}</td><td>{b.strategy}</td><td>{b.dataset?.mode||'legacy'}</td><td>{(b.dataset?.backtest_from||b.dataset?.from)&&(b.dataset?.backtest_to||b.dataset?.to)?((b.dataset?.backtest_from||b.dataset?.from)+' → '+(b.dataset?.backtest_to||b.dataset?.to)):'—'}</td><td>{pct(b.cagr)}</td><td>{b.sharpe}</td><td>{pct(b.max_drawdown)}</td></tr>)}</tbody></table>}</Card>
-    </>}
-
-    {tab==='Validation'&&<>
-      <Card title="Validation Gate">
-        <div className="row"><button className="btn" onClick={()=>postJob('/api/jobs/validation','Validation Gate')}>Run Full Validation</button></div>
-        {!validation||validation.status==='NOT_RUN'?<Empty>Aucune validation complète. Lance-la après le Daily Pipeline.</Empty>:<>
-          <div className={'validationHero '+(validation.passed?'pass':'block')}><b>{validation?.tier||'RESEARCH_ONLY'}</b><div className="mini">Candidat: {validation?.candidate_strategy||'—'}</div></div>
-          {(validation.checks||[]).map(c=><div className="checkRow" key={c.name}><Pill ok={c.ok}>{c.ok?'PASS':'BLOCK'}</Pill><div><b>{c.name}</b><div className="muted mini">{typeof c.detail==='object'?JSON.stringify(c.detail):String(c.detail??'')}</div></div></div>)}
-        </>}
-      </Card>
-      <div className="two section">
-        <Card title="META Ensemble V5">{validation?.meta_v5_backtest?<><div>Sharpe <b>{validation.meta_v5_backtest.sharpe}</b></div><div>CAGR <b>{pct(validation.meta_v5_backtest.cagr)}</b></div><div>DD <b>{pct(validation.meta_v5_backtest.max_drawdown)}</b></div><div>OOS IC <b>{num(validation.meta_v5_research?.oos_mean_rank_ic,4)}</b></div><div>Turnover <b>{pct(validation.meta_v5_backtest.avg_turnover_per_rebalance)}</b></div><div>Excess CAGR <b>{pct(validation.meta_v5_backtest.excess_cagr_vs_equal_weight)}</b></div></>:<Empty>—</Empty>}</Card>
-        <Card title="Benchmarks">{validation?.baseline_backtest?<><div>Momentum Sharpe <b>{validation.baseline_backtest.sharpe}</b></div><div>V4 Sharpe <b>{validation.v4_backtest?.sharpe??'—'}</b></div><div>Equal-weight CAGR <b>{pct(validation.meta_v5_backtest?.benchmark_cagr)}</b></div><div>Robust median Sharpe <b>{validation.meta_v5_robustness?.median_sharpe??'—'}</b></div></>:<Empty>—</Empty>}</Card>
-      </div>
-    </>}
-
-    {tab==='Signals'&&<>
-      <Card title="META V5 Current Signal">
-        <div className="row"><button className="btn" onClick={()=>postJob('/api/jobs/meta-v5-signals','META V5 Signals',{})}>Generate V5 Signals</button></div>
-        {!metaSignals||metaSignals.status==='NOT_RUN'?<Empty>Aucun signal V5 généré.</Empty>:<>
-          <div className="metricRow topGap"><span>Market date <b>{metaSignals.market_date}</b></span><span>Regime <b>{metaSignals.signals?.[0]?.regime||'—'}</b></span><span>Accepted <b>{metaSignals.accepted_count||0}</b></span><span>Paper <b>{metaSignals.paper_execution}</b></span></div>
-          <div className="tableScroll"><table><thead><tr><th>#</th><th>Symbol</th><th>Accepted</th><th>Probability</th><th>Smooth score</th><th>Size scale</th><th>Regime</th></tr></thead><tbody>{(metaSignals.signals||[]).slice(0,40).map(r=><tr key={r.symbol}><td>#{r.rank}</td><td><b>{r.symbol}</b></td><td><Pill ok={r.accepted}>{r.accepted?'TRADE':'SKIP'}</Pill></td><td>{pct(r.meta_probability)}</td><td>{num(r.smooth_score,4)}</td><td>{pct(r.position_scale)}</td><td>{r.regime}</td></tr>)}</tbody></table></div>
-        </>}
-      </Card>
-      <div className="two section">
-        <Card title="Legacy Factor Ranking">
-          {!factors.length?<Empty>Aucun signal.</Empty>:<table><thead><tr><th>#</th><th>Symbol</th><th>Score</th><th>Momentum</th><th>Fund.</th><th>Earnings</th></tr></thead><tbody>{factors.slice(0,30).map((r,i)=><tr className="clickable" key={r.symbol} onClick={()=>showExplain(r.symbol)}><td>{i+1}</td><td><b>{r.symbol}</b></td><td>{r.meta_score}</td><td>{r.momentum_12_1_rank}</td><td>{r.fundamental_raw_rank}</td><td>{r.earnings_raw_rank}</td></tr>)}</tbody></table>}
-        </Card>
-        <Card title={selectedSymbol?('Why '+selectedSymbol+'?'):'Signal Explainability'}>
-          {!explain?<Empty>Clique sur un ticker pour afficher ses contributeurs.</Empty>:<>
-            <div className="big">#{explain.rank} <span className="muted">/ {explain.universe_size}</span></div>
-            <div>Meta Score <b>{explain.meta_score}</b></div>
-            <h4>Factors</h4>{explain.factors.map(f=><div className="factorBar" key={f.key}><span>{f.label}</span><div><i style={{width:(f.rank*100)+'%'}}/></div><b>{pct(f.rank)}</b></div>)}
-            <h4>Top contributors</h4>{explain.positive_contributors.map(x=><div className="positive" key={x.key}>+ {x.label} {pct(x.rank)}</div>)}
-            <h4>Weak contributors</h4>{explain.negative_contributors.map(x=><div className="negative" key={x.key}>− {x.label} {pct(x.rank)}</div>)}
-          </>}
-        </Card>
-      </div>
-    </>}
-
-    {tab==='Paper'&&<>
-      <div className="grid">
-        <Metric label="Equity" value={'$'+Number(dash?.broker?.equity||0).toLocaleString()}/>
-        <Metric label="Buying Power" value={'$'+Number(dash?.broker?.buying_power||0).toLocaleString()}/>
-        <Metric label="Paper Return" value={pct(perf?.comparison?.paper_return)}/>
-        <Metric label="Orders" value={sys?.paper_orders_enabled?'ARMED':'LOCKED'}/>
-      </div>
-      <Card title="Rebalance / Risk Gate" className="section">
-        <div className="row"><button className="btn2" onClick={()=>direct('Preview Rebalance',async()=>{const x=await request('/api/paper/rebalance/preview?n='+cfg.long_count);setPreview(x);return x})}>Preview Rebalance</button><button className="btn2" onClick={()=>direct('Paper Snapshot',()=>request('/api/paper/snapshot',{method:'POST'}))}>Snapshot</button><button className="btn2" onClick={()=>direct('Reconcile',()=>request('/api/paper/reconcile',{method:'POST'}))}>Reconcile</button></div>
-        {preview&&<><div className="checksGrid">{preview.risk?.checks?.map(c=><div className="checkTile" key={c.name}><Pill ok={c.ok}>{c.ok?'PASS':'BLOCK'}</Pill><span>{c.name}</span></div>)}</div><p>{preview.proposed_orders?.length||0} actions proposées.</p></>}
-      </Card>
-      <div className="two section">
-        <Card title="Broker Positions">{!positions.length?<Empty>Aucune position.</Empty>:<table><tbody>{positions.map(p=><tr key={p.symbol}><td><b>{p.symbol}</b></td><td className={p.side==='LONG'?'positive':'negative'}>{p.side}</td><td>{pct(p.weight)}</td><td>${Number(p.notional).toFixed(0)}</td></tr>)}</tbody></table>}</Card>
-        <Card title="Tracked Orders">{!orders.length?<Empty>Aucun ordre.</Empty>:<table><tbody>{orders.slice(0,30).map(o=><tr key={o.client_order_id}><td>{o.symbol}</td><td>{o.side}</td><td>{o.status}</td><td>${Number(o.notional).toFixed(0)}</td></tr>)}</tbody></table>}</Card>
-      </div>
-      <Card title="Kill Switch" className="section dangerCard"><p>V1 : PAPER uniquement.</p><div className="row"><button className="dangerBtn" onClick={()=>{if(confirm('Annuler tous les ordres PAPER ouverts ?'))direct('Cancel open PAPER orders',()=>request('/api/paper/kill/cancel-orders',{method:'POST'}))}}>Cancel Open Orders</button><button className="dangerBtn" onClick={()=>{if(confirm('FLATTEN tout le portefeuille PAPER ?'))direct('Flatten PAPER',()=>request('/api/paper/kill/flatten?confirm=FLATTEN_PAPER',{method:'POST'}))}}>Flatten PAPER</button></div></Card>
-    </>}
-
-    {tab==='System'&&<>
-      <div className="two">
-        <Card title="Runtime"><table><tbody><tr><td>Data mode</td><td>{sys?.data_mode}</td></tr><tr><td>Alpaca</td><td>{sys?.alpaca_configured?'connected':'not configured'}</td></tr><tr><td>Trading env</td><td>{sys?.trading_env}</td></tr><tr><td>Live trading</td><td>{sys?.live_trading_supported?'SUPPORTED':'NOT IMPLEMENTED'}</td></tr><tr><td>Paper Auto</td><td>{sys?.paper_auto_enabled?'ON':'OFF'}</td></tr></tbody></table></Card>
-        <Card title="Recent Fills">{!fills.length?<Empty>Aucun fill.</Empty>:<table><tbody>{fills.slice(0,20).map(f=><tr key={f.id}><td>{f.symbol}</td><td>{f.side}</td><td>{f.qty}</td><td>${num(f.price,2)}</td><td>{f.event}</td></tr>)}</tbody></table>}</Card>
-      </div>
-      <Card title="All Jobs" className="section"><JobsTable jobs={jobs}/></Card>
-      <Card title="Experiments" className="section">{!experiments.length?<Empty>Aucune expérience.</Empty>:<table><tbody>{experiments.map(e=><tr key={e.id}><td>#{e.id}</td><td>{e.name}</td><td>{e.kind}</td><td>{e.status}</td></tr>)}</tbody></table>}</Card>
-    </>}
-  </main>
 }
 
-function JobsTable({jobs}){
-  if(!jobs.length)return <Empty>Aucun job lancé.</Empty>
-  return <table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody>{jobs.slice(0,30).map(j=><tr key={j.job_key}><td>{JOB_LABELS[j.kind]||j.kind}</td><td><span className={'pill '+String(j.status).toLowerCase()}>{STATUS_LABELS[j.status]||j.status}</span></td><td><div className="progress compact"><span style={{width:(j.progress||0)+'%'}}/></div><small>{j.progress}%</small></td><td>{j.error?<span className="negative">{j.error}</span>:(j.message||'—')}</td></tr>)}</tbody></table>
+export default function Home(){
+  const [view,setView]=useState('dashboard')
+  const [snapshot,setSnapshot]=useState(null)
+  const [loading,setLoading]=useState(true)
+  const [error,setError]=useState('')
+  const [refreshing,setRefreshing]=useState(false)
+  const [selectedBacktest,setSelectedBacktest]=useState(null)
+  const [backtestDetail,setBacktestDetail]=useState(null)
+  const [selectedSymbol,setSelectedSymbol]=useState(null)
+  const [explain,setExplain]=useState(null)
+
+  const loadSnapshot=async initial=>{
+    if(initial)setLoading(true)
+    try{
+      const data=await api('/api/app/snapshot')
+      setSnapshot(data)
+      setError('')
+      if(!selectedBacktest&&data.backtests?.[0]?.id)setSelectedBacktest(data.backtests[0].id)
+    }catch(e){
+      setError(e.name==='AbortError'?'API timeout':e.message)
+    }finally{
+      if(initial)setLoading(false)
+    }
+  }
+
+  useEffect(()=>{
+    loadSnapshot(true)
+    const timer=setInterval(()=>loadSnapshot(false),5000)
+    return()=>clearInterval(timer)
+  },[])
+
+  useEffect(()=>{
+    if(!selectedBacktest)return
+    let mounted=true
+    setBacktestDetail(null)
+    api('/api/backtests/'+selectedBacktest,{},12000)
+      .then(data=>{if(mounted)setBacktestDetail(data)})
+      .catch(e=>{if(mounted)setError(e.message)})
+    return()=>{mounted=false}
+  },[selectedBacktest])
+
+  const activeJob=useMemo(()=>snapshot?.jobs?.find(j=>j.status==='RUNNING'||j.status==='QUEUED'),[snapshot])
+  const v5Running=Boolean(snapshot?.jobs?.find(j=>j.kind==='META_V5'&&(j.status==='RUNNING'||j.status==='QUEUED')))
+
+  const refreshAll=async()=>{
+    setRefreshing(true)
+    try{
+      await api('/api/jobs/bootstrap?force_market=true&refresh_sec=false',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+      await loadSnapshot(false)
+    }catch(e){
+      setError(e.message)
+    }finally{
+      setRefreshing(false)
+    }
+  }
+
+  const runV5=async()=>{
+    try{
+      const payload={long_count:15,short_count:0,rebalance_days:10,commission_bps:6,slippage_bps:5,gross_exposure:1,initial_capital:100000,adaptive_lookback_days:252}
+      await api('/api/jobs/meta-v5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+      await loadSnapshot(false)
+    }catch(e){
+      setError(e.message)
+    }
+  }
+
+  const openSignal=async symbol=>{
+    setSelectedSymbol(symbol)
+    setExplain(null)
+    try{
+      setExplain(await api('/api/factors/'+encodeURIComponent(symbol)+'/explain',{},8000))
+    }catch(e){
+      setExplain({error:e.message})
+    }
+  }
+
+  if(loading&&!snapshot)return <LoadingScreen/>
+
+  return <div className="min-h-screen">
+    <TopNav view={view} setView={setView} snapshot={snapshot} onRefresh={refreshAll} refreshing={refreshing}/>
+    <main className="mx-auto max-w-[1600px] px-4 py-6 lg:px-6 lg:py-8">
+      <ErrorBanner message={error} onClose={()=>setError('')}/>
+      {view!=='dashboard'&&activeJob&&<JobBanner job={{...activeJob,label:JOB_LABELS[activeJob.kind]||activeJob.kind}}/>}
+      {view==='dashboard'&&<DashboardView snapshot={snapshot} onSignal={openSignal}/>}
+      {view==='research'&&<ResearchView snapshot={snapshot}/>}
+      {view==='backtests'&&<BacktestsView snapshot={snapshot} detail={backtestDetail} onSelect={setSelectedBacktest} onRunV5={runV5} running={v5Running}/>}
+      {view==='signals'&&<SignalsView snapshot={snapshot} onSignal={openSignal}/>}
+      {view==='paper'&&<PaperView snapshot={snapshot}/>}
+      {view==='system'&&<SystemView snapshot={snapshot} onRefresh={refreshAll} refreshing={refreshing}/>}
+    </main>
+    <SignalDrawer symbol={selectedSymbol} explain={explain} onClose={()=>{setSelectedSymbol(null);setExplain(null)}}/>
+  </div>
 }
