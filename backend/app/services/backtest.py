@@ -157,7 +157,8 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
     all_dates=np.array(sorted(df.date.unique()))
     if len(all_dates)<280: raise ValueError("Not enough history for warm-up and out-of-sample backtest")
     signal_dates=list(all_dates[260::int(p["rebalance_days"])])
-    equity=1.0;curve=[];turnovers=[];prev_weights={};prev_qty={}\n    benchmark_equity=1.0;benchmark_curve=[]
+    equity=1.0;curve=[];turnovers=[];prev_weights={};prev_qty={}
+    benchmark_equity=1.0;benchmark_curve=[]
     positions=[];orders=[];rebalances=[];gross_pnl=[];costs=[]
     initial_capital=float(p.get("initial_capital",100000))
     by_date={d:x.set_index("symbol") for d,x in df.groupby("date")}
