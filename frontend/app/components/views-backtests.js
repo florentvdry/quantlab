@@ -13,9 +13,10 @@ function BacktestDetail({detail,registry,fetchBacktest}){
   const positions=safeArray(detail.position_ledger)
   const orders=safeArray(detail.order_ledger)
   const rebalances=safeArray(detail.rebalance_ledger)
-  const simulation=detail.meta_v7?.simulation||detail.meta_v6?.simulation||detail.meta_v5?.simulation
-  const target=detail.meta_v7?.target||detail.meta_v6?.target
-  const riskOverlay=detail.meta_v7?.risk_overlay
+  const simulation=detail.meta_v71?.simulation||detail.meta_v7?.simulation||detail.meta_v6?.simulation||detail.meta_v5?.simulation
+  const target=detail.meta_v71?.target||detail.meta_v7?.target||detail.meta_v6?.target
+  const riskOverlay=detail.meta_v71?.risk_overlay||detail.meta_v7?.risk_overlay
+  const exposureOverlay=detail.meta_v71?.exposure_overlay
   const stats=[
     ['CAGR',pct(metrics.cagr)],
     ['Sharpe',num(metrics.sharpe,2)],
@@ -56,6 +57,11 @@ function BacktestDetail({detail,registry,fetchBacktest}){
           <div className="mt-1">Corrélation {riskOverlay.corr_lookback_days}j · cap {num(riskOverlay.corr_cap,2)} · max {riskOverlay.max_names} titres · poids max {pct(riskOverlay.single_name_weight_cap)}</div>
           <div>Volatility scaling + exposition marché dynamique · {riskOverlay.method}</div>
         </div>}
+        {exposureOverlay&&<div className="mt-3 rounded-xl border border-cyan-300/10 bg-cyan-400/[0.03] p-3 text-[11px] leading-5 text-slate-500">
+          <div className="font-semibold text-cyan-300">V7.1 balanced exposure</div>
+          <div className="mt-1">Gross cible moyen {pct(exposureOverlay.mean_target_gross)} · max {pct(exposureOverlay.max_target_gross)}</div>
+          <div>Confiance META + régime + risque marché · {exposureOverlay.method}</div>
+        </div>}
       </div>}
       <BacktestAnalytics detail={detail} registry={registry} fetchBacktest={fetchBacktest}/>
     </Panel>
@@ -93,7 +99,7 @@ function BacktestDetail({detail,registry,fetchBacktest}){
 export function BacktestsView({snapshot,detail,onSelect,onRunCandidate,running,fetchBacktest}){
   const rows=safeArray(snapshot?.backtests)
   return <div className="space-y-6">
-    <SectionHeading title="Backtests" description="V6 est maintenant la référence performance. V7 garde exactement son alpha et teste uniquement une couche de diversification/risque pour réduire les grosses claques et la dépendance aux paniers corrélés." action={<Button kind="primary" icon={RefreshCcw} disabled={running} onClick={onRunCandidate}>{running?'V7 en cours…':'Tester META V7'}</Button>}/>
+    <SectionHeading title="Backtests" description="V7 reste le contrôle risk-aware. V7.1 conserve exactement le même alpha et la même diversification, mais réalloue mieux le capital quand la confiance est suffisante." action={<Button kind="primary" icon={RefreshCcw} disabled={running} onClick={onRunCandidate}>{running?'V7.1 en cours…':'Tester META V7.1'}</Button>}/>
     <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
       <Panel className="h-fit overflow-hidden">
         <PanelHeader title="Registry" eyebrow={rows.length+' runs'}/>
