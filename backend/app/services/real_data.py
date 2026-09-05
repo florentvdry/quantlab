@@ -107,15 +107,41 @@ def universe(force=False):
     os.replace(tmp,path)
     return syms
 
+def _bars_meta_path():
+    return os.path.join(DATA_DIR,"alpaca_bars.meta.json")
+
+def market_data_metadata():
+    path=_bars_meta_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path,encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
+
+def _requested_history_start():
+    configured=str(getattr(settings,"real_history_start","") or "").strip()
+    if configured:
+        return configured
+    return (date.today()-timedelta(days=365*settings.real_history_years+30)).isoformat()
+
 def fetch_bars(force=False):
     require_keys()
     path=os.path.join(DATA_DIR,"alpaca_bars.parquet")
-    if os.path.exists(path) and not force and pd.Timestamp.now().timestamp()-os.path.getmtime(path)<12*3600:
+    syms=universe(force=force)
+    start=_requested_history_start()
+    end=date.today().isoformat()
+    meta=market_data_metadata()
+    cache_matches=(
+        os.path.exists(path)
+        and meta.get("requested_start")==start
+        and meta.get("feed")==settings.alpaca_feed
+        and meta.get("universe_size")==len(syms)
+    )
+    if cache_matches and not force and pd.Timestamp.now().timestamp()-os.path.getmtime(path)<12*3600:
         return pd.read_parquet(path)
 
-    syms=universe(force=force)
-    start=(date.today()-timedelta(days=365*settings.real_history_years+30)).isoformat()
-    end=date.today().isoformat()
     rows=[]
     failures=[]
 
@@ -161,6 +187,22 @@ def fetch_bars(force=False):
     tmp=path+".tmp"
     df.to_parquet(tmp,index=False)
     os.replace(tmp,path)
+    meta={
+        "requested_start":start,
+        "requested_end":end,
+        "actual_from":str(pd.Timestamp(df.date.min()).date()),
+        "actual_to":str(pd.Timestamp(df.date.max()).date()),
+        "feed":settings.alpaca_feed,
+        "symbols":int(df.symbol.nunique()),
+        "universe_size":len(syms),
+        "rows":int(len(df)),
+        "updated_at":pd.Timestamp.utcnow().isoformat(),
+        "failures":failures[:20],
+    }
+    meta_path=_bars_meta_path();tmp_meta=meta_path+".tmp"
+    with open(tmp_meta,"w",encoding="utf-8") as fh:
+        json.dump(meta,fh,indent=2)
+    os.replace(tmp_meta,meta_path)
     return df
 
 def fetch_news(days=30):
