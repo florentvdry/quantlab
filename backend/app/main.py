@@ -193,6 +193,10 @@ def job_baseline(req:BacktestRequest):return enqueue("BASELINE",req.model_dump()
 def job_sweep(req:ExperimentRequest):return enqueue("SWEEP",{"base":req.base.model_dump(),"grid":req.grid})
 @app.post("/api/jobs/robustness")
 def job_robustness(req:BacktestRequest):return enqueue("ROBUSTNESS",req.model_dump())
+@app.post("/api/jobs/model-backtest/{model}")
+def job_model_backtest(model:str,req:BacktestRequest):
+    if model not in ("ridge","hgb"):raise HTTPException(400,"model must be ridge or hgb")
+    return enqueue(("RIDGE_BACKTEST" if model=="ridge" else "HGB_BACKTEST"),req.model_dump())
 @app.post("/api/jobs/train/{model}")
 def job_train(model:str):
     if model not in ("ridge","hgb"):raise HTTPException(400,"model must be ridge or hgb")
