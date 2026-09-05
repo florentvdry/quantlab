@@ -43,13 +43,15 @@ def loop():
     while True:
         now=datetime.now(TZ);day=now.strftime("%Y-%m-%d");db=SessionLocal()
         try:
-            if _bootstrap_needed(db) and not _bootstrap_active_or_recent_failure(db):
+            daily_due=settings.daily_pipeline_enabled and now.hour==settings.daily_pipeline_hour_et and now.minute>=settings.daily_pipeline_minute_et
+            daily_queued=False
+            if daily_due and not _done(db,"scheduler.daily_pipeline",day) and not _bootstrap_active_or_recent_failure(db):
+                enqueue("AUTO_BOOTSTRAP",{"force_market":True,"refresh_sec":now.weekday()==settings.daily_sec_refresh_weekday})
+                enqueue("PAPER_SNAPSHOT",{});_mark(db,"scheduler.daily_pipeline",day);daily_queued=True
+                print("Daily autopilot refresh queued",day,flush=True)
+            if not daily_queued and _bootstrap_needed(db) and not _bootstrap_active_or_recent_failure(db):
                 enqueue("AUTO_BOOTSTRAP",{"force_market":False,"refresh_sec":False})
                 print("Autopilot bootstrap queued",flush=True)
-            daily_due=settings.daily_pipeline_enabled and now.hour==settings.daily_pipeline_hour_et and now.minute>=settings.daily_pipeline_minute_et
-            if daily_due and not _done(db,"scheduler.daily_pipeline",day):
-                enqueue("AUTO_BOOTSTRAP",{"force_market":True,"refresh_sec":now.weekday()==settings.daily_sec_refresh_weekday})
-                enqueue("PAPER_SNAPSHOT",{});_mark(db,"scheduler.daily_pipeline",day);print("Daily autopilot refresh queued",day,flush=True)
             hour_key=now.strftime("%Y-%m-%d-%H")
             if settings.alpaca_api_key and settings.alpaca_secret_key and not _done(db,"scheduler.reconcile",hour_key):
                 try:ExecutionService(db,PaperBrokerService(db)).reconcile()
