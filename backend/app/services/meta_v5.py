@@ -450,9 +450,14 @@ def build_meta_v5_oos(
             return cached_scored,cached_research
     eligible_mask=source["solid_eligible"].fillna(False).astype(bool) if "solid_eligible" in source.columns else pd.Series(True,index=source.index)
     eligible_source=source[eligible_mask].copy()
+    min_cross_section=(
+        int(V5_CONFIG["min_cross_section_names"])
+        if settings.data_mode.lower()=="alpaca"
+        else 1
+    )
     eligible_counts=eligible_source.groupby("date")["symbol"].nunique()
     valid_cross_section_dates=set(
-        eligible_counts[eligible_counts>=int(V5_CONFIG["min_cross_section_names"])].index
+        eligible_counts[eligible_counts>=min_cross_section].index
     )
     labelled = eligible_source[eligible_source["date"].isin(valid_cross_section_dates)].dropna(
         subset=MODEL_FEATURES + ["future_relative_20d"]
@@ -565,7 +570,7 @@ def build_meta_v5_oos(
         current = by_date[signal_date].dropna(subset=MODEL_FEATURES).copy()
         if "solid_eligible" in current.columns:
             current=current[current["solid_eligible"].fillna(False).astype(bool)].copy()
-        if len(current)<int(V5_CONFIG["min_cross_section_names"]):
+        if len(current)<min_cross_section:
             continue
 
         current_pred = _predict_base(live_models, current)
