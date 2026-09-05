@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime, timezone
 from app.core.config import settings
-from app.services.features import build_feature_panel, panel_metadata
+from app.services.features import build_feature_panel, panel_metadata, clear_feature_cache
 from app.services.data_quality import report
 from app.services.dataset_state import set_state, fingerprint
 
@@ -25,7 +25,7 @@ def run_daily_pipeline(db,force_market=False,refresh_sec=False,progress=None):
             sec={"version":fingerprint({"covered":covered,"events":events}),"symbols":len(syms),"covered":covered,"events":events}
             result["steps"].append({"name":"sec",**sec});set_state(db,"fundamentals",sec)
     progress(55,"Construction du Feature Store")
-    panel=build_feature_panel();meta=panel_metadata(panel);latest=panel.date.max();snap=panel[panel.date==latest]
+    clear_feature_cache();panel=build_feature_panel(force=True);meta=panel_metadata(panel);latest=panel.date.max();snap=panel[panel.date==latest]
     state={"version":meta["fingerprint"],"schema":meta["schema"],"rows":len(panel),"latest":str(latest),"symbols":int(snap.symbol.nunique()),"mode":meta["mode"]}
     set_state(db,"features",state);result["steps"].append({"name":"features",**state})
     progress(80,"Contrôle qualité des données")
