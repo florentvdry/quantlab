@@ -111,7 +111,7 @@ export default function Home(){
       {view!=='dashboard'&&activeJob&&<JobBanner job={{...activeJob,label:JOB_LABELS[activeJob.kind]||activeJob.kind}}/>}
       {view==='dashboard'&&<DashboardView snapshot={snapshot} onSignal={openSignal}/>}
       {view==='research'&&<ResearchView snapshot={snapshot}/>}
-      {view==='backtests'&&<BacktestsView snapshot={snapshot} detail={backtestDetail} onSelect={setSelectedBacktest} onRunCandidate={runCandidate} running={candidateRunning}/>} 
+      {view==='backtests'&&<BacktestsView snapshot={snapshot} detail={backtestDetail} onSelect={setSelectedBacktest} onRunCandidate={runCandidate} running={candidateRunning} fetchBacktest={id=>api('/api/backtests/'+id,{},12000)}/>} 
       {view==='signals'&&<SignalsView snapshot={snapshot} onSignal={openSignal}/>}
       {view==='paper'&&<PaperView snapshot={snapshot}/>}
       {view==='system'&&<SystemView snapshot={snapshot} onRefresh={refreshAll} refreshing={refreshing}/>}
