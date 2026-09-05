@@ -314,7 +314,23 @@ def execute_job(key:str):
         else: raise ValueError(f"Unknown job kind {row.kind}")
         update(db,row,status="COMPLETED",progress=100,result_json=safe_dumps(result,default=str),completed_at=datetime.utcnow())
     except Exception as e:
-        update(db,row,status="FAILED",error=str(e),result_json=safe_dumps({"message":"Échec","traceback":traceback.format_exc()}),completed_at=datetime.utcnow())
+        previous={}
+        try:
+            previous=json.loads(row.result_json or "{}")
+        except Exception:
+            previous={}
+        failure={
+            "message":"Échec",
+            "traceback":traceback.format_exc(),
+        }
+        for key in ("backtest_id","model_version_id"):
+            if previous.get(key) is not None:
+                failure[key]=previous.get(key)
+        update(
+            db,row,status="FAILED",error=str(e),
+            result_json=safe_dumps(failure),
+            completed_at=datetime.utcnow(),
+        )
     finally: db.close()
 
 def _heartbeat_loop():
