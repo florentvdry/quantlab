@@ -13,7 +13,9 @@ from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
+from app.core.config import settings
 from app.services.features import FEATURES, build_feature_panel, panel_metadata
+from app.services.research_cache import load as load_research_cache, make_key as make_research_cache_key, save as save_research_cache
 
 # Historical news is intentionally excluded until QuantLab has a point-in-time
 # news archive. Everything below must be available at the signal close.
@@ -38,6 +40,8 @@ V5_PORTFOLIO = {
     "min_long_count": 5,
     "normalize_position_scale": False,
 }
+
+V5_CACHE_VERSION = "v5-continuous-solid-v4-1"
 
 V5_CONFIG = {
     "min_train_days": 126,
@@ -421,6 +425,28 @@ def build_meta_v5_oos(
     """
     source = build_feature_panel() if panel is None else panel.copy()
     source = _regime_frame(source).sort_values(["date", "symbol"])
+    dataset_meta=panel_metadata(source)
+    cache_key=make_research_cache_key(
+        "meta_v5_oos",
+        dataset_meta["fingerprint"],
+        V5_CACHE_VERSION,
+        V5_CONFIG,
+        {"model_features":MODEL_FEATURES},
+    )
+    if settings.data_mode.lower()=="alpaca":
+        cached=load_research_cache("meta_v5_oos",cache_key)
+        if cached is not None:
+            cached_scored,cached_research,cached_meta=cached
+            cached_research=dict(cached_research)
+            cached_research["cache"]={
+                "hit":True,
+                "version":V5_CACHE_VERSION,
+                "key":cache_key,
+                "stored_at":cached_meta.get("stored_at"),
+            }
+            if progress:
+                progress(74,"META V5 — cache OOS réutilisé; aucun réentraînement historique")
+            return cached_scored,cached_research
     eligible_mask=source["solid_eligible"].fillna(False).astype(bool) if "solid_eligible" in source.columns else pd.Series(True,index=source.index)
     labelled = source[eligible_mask].dropna(subset=MODEL_FEATURES + ["future_relative_20d"]).copy()
     all_dates = np.array(sorted(source["date"].unique()))
@@ -608,7 +634,10 @@ def build_meta_v5_oos(
         "overall_acceptance_rate": round(float(accepted.mean()), 4),
         "folds": refreshes,
         "refreshes": refreshes,
+        "cache":{"hit":False,"version":V5_CACHE_VERSION,"key":cache_key},
     }
+    if settings.data_mode.lower()=="alpaca":
+        save_research_cache("meta_v5_oos",cache_key,scored,summary,dataset_meta["fingerprint"])
     return scored, summary
 
 def run_meta_v5(
