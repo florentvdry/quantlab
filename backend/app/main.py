@@ -185,6 +185,8 @@ def promote(strategy_id:int,db:Session=Depends(get_db)):
 
 @app.post("/api/jobs/backtest")
 def job_backtest(req:BacktestRequest):return enqueue("BACKTEST",req.model_dump())
+@app.post("/api/jobs/v4-backtest")
+def job_v4_backtest():return enqueue("V4_BACKTEST",{})
 @app.post("/api/jobs/adaptive-backtest")
 def job_adaptive_backtest(req:BacktestRequest):return enqueue("ADAPTIVE_BACKTEST",req.model_dump())
 @app.post("/api/jobs/baseline")
