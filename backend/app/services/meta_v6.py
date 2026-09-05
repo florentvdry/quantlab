@@ -40,7 +40,7 @@ V6_CONFIG = {
     # between the most recent training label and the score date.
     "embargo_days": 12,
     "min_train_days": 126,
-    "validation_days": 63,
+    "validation_days": 126,
     "model_refresh_days": 20,
     "ewma_span": 5,
     "lgbm_members": 3,
@@ -243,6 +243,14 @@ def _size_from_probability(prob, threshold):
     return np.where(accepted, 0.10 + 0.90 * np.power(confidence, 1.25), 0.0)
 
 
+class _ConstantProbabilityClassifier:
+    def __init__(self, probability: float):
+        self.probability=float(np.clip(probability,1e-4,1-1e-4))
+    def predict_proba(self, x):
+        p=np.full(len(x),self.probability,dtype=float)
+        return np.column_stack([1.0-p,p])
+
+
 @dataclass
 class MetaLayerV6:
     classifier: object
@@ -320,13 +328,15 @@ def _portfolio_threshold_search(cal: pd.DataFrame, probabilities: np.ndarray):
                 best = (score, float(threshold), int(long_count))
 
     if best is None:
-        return 0.60, 10, rows
+        thresholds=list(V6_CONFIG["meta_threshold_grid"])
+        counts=list(V6_CONFIG["long_count_grid"])
+        return float(thresholds[len(thresholds)//2]), int(counts[len(counts)//2]), rows
     return best[1], best[2], rows
 
 
 def _fit_meta_layer(validation: pd.DataFrame) -> MetaLayerV6:
     dates = np.array(sorted(validation["date"].unique()))
-    split = max(20, int(len(dates) * 0.65))
+    split = max(30, int(len(dates) * 0.55))
     inner_embargo = int(V6_CONFIG["embargo_days"])
     cal_start = min(len(dates), split + inner_embargo)
     fit_dates = dates[:split]
@@ -345,11 +355,14 @@ def _fit_meta_layer(validation: pd.DataFrame) -> MetaLayerV6:
     # Crucial V6 difference: the filter asks "would this long make money after
     # expected round-trip costs?", not merely "would it beat the cross-section?".
     y_fit = (fit["v6_future_open_return"] > cost).astype(int)
-    clf = make_pipeline(
-        StandardScaler(),
-        LogisticRegression(C=0.30, class_weight="balanced", max_iter=1000, random_state=42),
-    )
-    clf.fit(x_fit[cols], y_fit)
+    if y_fit.nunique()<2:
+        clf=_ConstantProbabilityClassifier(float(y_fit.mean()))
+    else:
+        clf = make_pipeline(
+            StandardScaler(),
+            LogisticRegression(C=0.30, class_weight="balanced", max_iter=1000, random_state=42),
+        )
+        clf.fit(x_fit[cols], y_fit)
 
     x_cal, _ = _meta_matrix(cal)
     y_cal = (cal["v6_future_open_return"] > cost).astype(int).to_numpy()
