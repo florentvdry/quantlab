@@ -434,7 +434,8 @@ def build_meta_v6_oos(
     source = _add_execution_aligned_targets(source)
     source = _context_frame(source).sort_values(["date", "symbol"])
 
-    labelled = source.dropna(
+    eligible_mask=source["solid_eligible"].fillna(False).astype(bool) if "solid_eligible" in source.columns else pd.Series(True,index=source.index)
+    labelled = source[eligible_mask].dropna(
         subset=MODEL_FEATURES + ["v6_future_relative_return", "v6_future_open_return"]
     ).copy()
     all_dates = np.array(sorted(source["date"].unique()))
@@ -525,6 +526,8 @@ def build_meta_v6_oos(
             continue
 
         current = by_date[signal_date].dropna(subset=MODEL_FEATURES).copy()
+        if "solid_eligible" in current.columns:
+            current=current[current["solid_eligible"].fillna(False).astype(bool)].copy()
         if current.empty:
             continue
 
