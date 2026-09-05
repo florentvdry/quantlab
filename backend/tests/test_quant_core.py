@@ -159,10 +159,10 @@ def test_meta_v5_ewma_is_one_sided():
     b=_blend(changed,router)
     assert np.allclose(a["v5_smooth_score"].iloc[:-1],b["v5_smooth_score"].iloc[:-1])
 
-def test_meta_v5_nested_walk_forward_has_outer_embargo(monkeypatch):
+def test_meta_v5_continuous_walk_forward_has_no_fixed_holdout(monkeypatch):
     from app.services import meta_v5
     from app.services.features import FEATURES
-    dates=pd.bdate_range("2023-01-02",periods=430)
+    dates=pd.bdate_range("2023-01-02",periods=320)
     symbols=[f"S{i:02d}" for i in range(18)]
     rows=[]
     for i,d in enumerate(dates):
@@ -175,11 +175,13 @@ def test_meta_v5_nested_walk_forward_has_outer_embargo(monkeypatch):
                 row[name]=max(.001,min(.999,quality+(fi%3-1)*.01))
             rows.append(row)
     panel=pd.DataFrame(rows)
-    monkeypatch.setitem(meta_v5.V5_CONFIG,"min_train_days",320)
-    monkeypatch.setitem(meta_v5.V5_CONFIG,"validation_days",60)
-    monkeypatch.setitem(meta_v5.V5_CONFIG,"test_days",50)
+    monkeypatch.setitem(meta_v5.V5_CONFIG,"min_train_days",90)
+    monkeypatch.setitem(meta_v5.V5_CONFIG,"validation_days",40)
+    monkeypatch.setitem(meta_v5.V5_CONFIG,"model_refresh_days",40)
     monkeypatch.setitem(meta_v5.V5_CONFIG,"lgbm_members",1)
     scored,summary=meta_v5.build_meta_v5_oos(panel=panel)
+    assert summary["simulation"]["method"]=="CONTINUOUS_EXPANDING_WALK_FORWARD"
+    assert summary["simulation"]["fixed_holdout"] is False
     assert summary["folds"]
     pos={d:i for i,d in enumerate(sorted(panel.date.unique()))}
     for fold in summary["folds"]:
@@ -187,6 +189,8 @@ def test_meta_v5_nested_walk_forward_has_outer_embargo(monkeypatch):
         tfrom=pd.Timestamp(fold["test_from"])
         assert pos[tfrom]-pos[vto]>=20
         assert fold["meta"]["calibration_embargo_days"]>=0
+    first_scored=scored.loc[scored["v5_meta_probability"].notna(),"date"].min()
+    assert first_scored<dates[int(len(dates)*.70)]
     assert scored["v5_meta_probability"].notna().any()
 
 def test_probability_sizing_can_leave_cash():
@@ -255,3 +259,18 @@ def test_json_safe_normalizes_non_finite_quant_values():
     assert '"nan":null' in rendered
     assert "NaN" not in rendered
     assert "Infinity" not in rendered
+
+
+def test_backtest_starts_at_first_available_signal_instead_of_hidden_260_day_skip():
+    from app.services.backtest import run_backtest
+    dates=pd.bdate_range("2025-01-02",periods=90)
+    rows=[]
+    for si,s in enumerate(["A","B","C","D"]):
+        for i,d in enumerate(dates):
+            rows.append({"date":d,"symbol":s,"sector":"Test","open":100+si+i*.02,"close":100+si+i*.02,
+                         "meta_score":1-si/4,"momentum_12_1_rank":1-si/4,"future_relative_20d":0})
+    panel=pd.DataFrame(rows)
+    result=run_backtest({"long_count":1,"short_count":1,"rebalance_days":10},panel=panel)
+    assert result["position_ledger"]
+    assert pd.Timestamp(result["position_ledger"][0]["signal_date"])==dates[0]
+    assert pd.Timestamp(result["position_ledger"][0]["entry_date"])==dates[1]
