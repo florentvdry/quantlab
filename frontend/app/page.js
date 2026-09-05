@@ -188,10 +188,31 @@ export default function Home(){
       </Card>
       {selectedBacktest&&<Card title={selectedBacktest.strategy} className="section">
         <div className="metricRow">
-          <span>Sharpe <b>{selectedBacktest.metrics?.sharpe}</b></span><span>CAGR <b>{pct(selectedBacktest.metrics?.cagr)}</b></span><span>Max DD <b>{pct(selectedBacktest.metrics?.max_drawdown)}</b></span><span>IC <b>{num(selectedBacktest.metrics?.mean_rank_ic_20d,4)}</b></span><span>Win rate <b>{pct(selectedBacktest.metrics?.win_rate)}</b></span><span>Profit factor <b>{num(selectedBacktest.metrics?.profit_factor,2)}</b></span>
+          <span>Sharpe <b>{selectedBacktest.metrics?.sharpe}</b></span>
+          <span>CAGR <b>{pct(selectedBacktest.metrics?.cagr)}</b></span>
+          <span>Max DD <b>{pct(selectedBacktest.metrics?.max_drawdown)}</b></span>
+          <span>IC <b>{num(selectedBacktest.metrics?.mean_rank_ic_20d,4)}</b></span>
+          <span>Win rate <b>{pct(selectedBacktest.metrics?.win_rate)}</b></span>
+          <span>Profit factor <b>{num(selectedBacktest.metrics?.profit_factor,2)}</b></span>
         </div>
         <div className="metricRow topGap">
-          <span>Capital départ <b>{'
+          <span>Capital départ <b>{'$'+Number(selectedBacktest.metrics?.initial_capital_usd||0).toLocaleString()}</b></span>
+          <span>Capital fin <b>{'$'+Number(selectedBacktest.metrics?.ending_capital_usd||0).toLocaleString()}</b></span>
+          <span>P&L net <b className={(selectedBacktest.metrics?.net_pnl_usd||0)>=0?'positive':'negative'}>{'$'+Number(selectedBacktest.metrics?.net_pnl_usd||0).toLocaleString()}</b></span>
+          <span>Coûts <b>{'$'+Number(selectedBacktest.metrics?.estimated_costs_usd||0).toLocaleString()}</b></span>
+          <span>Long P&L <b>{'$'+Number(selectedBacktest.metrics?.long_pnl_usd||0).toLocaleString()}</b></span>
+          <span>Short P&L <b>{'$'+Number(selectedBacktest.metrics?.short_pnl_usd||0).toLocaleString()}</b></span>
+        </div>
+        <div className="datasetBadge">{selectedBacktest.dataset?.mode||'legacy'} · {selectedBacktest.dataset?.from||'?'} → {selectedBacktest.dataset?.to||'?'} · {selectedBacktest.dataset?.fingerprint||'no fingerprint'}</div>
+        <p className="muted mini">{selectedBacktest.audit_note||'Signal au close T, exécution au prochain open.'}</p>
+        <div className="chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={selectedBacktest.equity_curve||[]}><XAxis dataKey="date" minTickGap={45}/><YAxis domain={['auto','auto']}/><Tooltip/><Line dataKey="equity" dot={false}/></LineChart></ResponsiveContainer></div>
+        <h4>Ordres simulés ({selectedBacktest.order_ledger?.length||0})</h4>
+        {!selectedBacktest.order_ledger?.length?<Empty>Ancien backtest : relance un V2/V3 pour obtenir le journal détaillé.</Empty>:<div className="tableScroll"><table><thead><tr><th>Date</th><th>Symbole</th><th>Action</th><th>Prix</th><th>Qté</th><th>Notionnel</th><th>Coût</th></tr></thead><tbody>{selectedBacktest.order_ledger.slice(-250).reverse().map((o,i)=><tr key={o.rebalance_id+'-'+o.symbol+'-'+i}><td>{o.date}</td><td><b>{o.symbol}</b></td><td className={o.action==='BUY'||o.action==='COVER'?'positive':'negative'}>{o.action}</td><td>{'$'+num(o.price,2)}</td><td>{num(o.qty,3)}</td><td>{'$'+Number(o.notional_usd||0).toLocaleString()}</td><td>{'$'+num(o.estimated_cost_usd,2)}</td></tr>)}</tbody></table></div>}
+        <h4>Positions / P&L par période ({selectedBacktest.position_ledger?.length||0})</h4>
+        {!selectedBacktest.position_ledger?.length?<Empty>Pas de ledger disponible.</Empty>:<div className="tableScroll"><table><thead><tr><th>Signal</th><th>Entrée</th><th>Sortie</th><th>Symbole</th><th>Side</th><th>Rang</th><th>Score</th><th>Prix entrée</th><th>Prix sortie</th><th>Qté</th><th>Return</th><th>P&L brut</th><th>Coût</th><th>P&L net</th></tr></thead><tbody>{selectedBacktest.position_ledger.slice(-250).reverse().map((t,i)=><tr key={t.rebalance_id+'-'+t.symbol+'-'+i}><td>{t.signal_date}</td><td>{t.entry_date}</td><td>{t.exit_date}</td><td><b>{t.symbol}</b></td><td className={t.side==='LONG'?'positive':'negative'}>{t.side}</td><td>#{t.rank}</td><td>{num(t.signal_score,4)}</td><td>{'$'+num(t.entry_price,2)}</td><td>{'$'+num(t.exit_price,2)}</td><td>{num(t.qty,3)}</td><td>{pct(t.position_return??(t.side==='LONG'?t.asset_return:-t.asset_return))}</td><td className={(t.gross_pnl_usd||0)>=0?'positive':'negative'}>{'$'+num(t.gross_pnl_usd,2)}</td><td>{'$'+num(t.estimated_cost_usd,2)}</td><td className={(t.net_pnl_usd||0)>=0?'positive':'negative'}>{'$'+num(t.net_pnl_usd,2)}</td></tr>)}</tbody></table></div>}
+        <h4>Rebalances ({selectedBacktest.rebalance_ledger?.length||0})</h4>
+        {selectedBacktest.rebalance_ledger?.length>0&&<div className="tableScroll"><table><thead><tr><th>#</th><th>Signal</th><th>Entrée</th><th>Sortie</th><th>Turnover</th><th>Equity avant</th><th>P&L brut</th><th>Coûts</th><th>P&L net</th><th>Equity après</th></tr></thead><tbody>{selectedBacktest.rebalance_ledger.slice(-100).reverse().map(r=><tr key={r.rebalance_id}><td>#{r.rebalance_id}</td><td>{r.signal_date}</td><td>{r.entry_date}</td><td>{r.exit_date}</td><td>{pct(r.turnover)}</td><td>{'$'+Number(r.equity_before_usd||0).toLocaleString()}</td><td>{'$'+num(r.gross_pnl_usd,2)}</td><td>{'$'+num(r.cost_usd,2)}</td><td className={(r.net_pnl_usd||0)>=0?'positive':'negative'}>{'$'+num(r.net_pnl_usd,2)}</td><td>{'$'+Number(r.equity_after_usd||0).toLocaleString()}</td></tr>)}</tbody></table></div>}
+      </Card>}
       <Card title="Backtest Registry" className="section">{!backtests.length?<Empty>Aucun backtest.</Empty>:<table><thead><tr><th>#</th><th>Strategy</th><th>Data</th><th>Period</th><th>CAGR</th><th>Sharpe</th><th>Max DD</th></tr></thead><tbody>{backtests.map(b=><tr key={b.id} className="clickable" onClick={()=>openBacktest(b.id)}><td>#{b.id}</td><td>{b.strategy}</td><td>{b.dataset?.mode||'legacy'}</td><td>{b.dataset?.from&&b.dataset?.to?(b.dataset.from+' → '+b.dataset.to):'—'}</td><td>{pct(b.cagr)}</td><td>{b.sharpe}</td><td>{pct(b.max_drawdown)}</td></tr>)}</tbody></table>}</Card>
     </>}
 
