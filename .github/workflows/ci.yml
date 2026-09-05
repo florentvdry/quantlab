@@ -51,3 +51,5 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8000
         run: npm run build
+      - name: Build frontend Docker image
+        run: docker build --build-arg NEXT_PUBLIC_API_URL=http://localhost:8000 -t quantlab-frontend-ci ./frontend
