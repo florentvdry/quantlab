@@ -12,7 +12,8 @@ function BacktestDetail({detail}){
   const positions=safeArray(detail.position_ledger)
   const orders=safeArray(detail.order_ledger)
   const rebalances=safeArray(detail.rebalance_ledger)
-  const simulation=detail.meta_v5?.simulation
+  const simulation=detail.meta_v6?.simulation||detail.meta_v5?.simulation
+  const target=detail.meta_v6?.target
   const stats=[
     ['CAGR',pct(metrics.cagr)],
     ['Sharpe',num(metrics.sharpe,2)],
@@ -43,6 +44,11 @@ function BacktestDetail({detail}){
           <div><div className="text-slate-600">Refresh / Rebalance</div><div className="mt-1 text-slate-300">{simulation.model_refresh_days}j / {simulation.rebalance_days}j</div></div>
         </div>
         <div className="mt-3 text-[11px] leading-5 text-slate-500">Pas de holdout fixe : après le démarrage minimal, chaque date est simulée chronologiquement avec uniquement les données alors connues.</div>
+        {target&&<div className="mt-3 rounded-xl border border-white/6 bg-black/15 p-3 text-[11px] leading-5 text-slate-500">
+          <div><span className="text-slate-400">Alpha target :</span> {target.alpha}</div>
+          <div><span className="text-slate-400">Meta label :</span> {target.meta_label}</div>
+          <div><span className="text-slate-400">Coût intégré au label :</span> {target.round_trip_cost_bps} bps round-trip</div>
+        </div>}
       </div>}
       <div className="h-72 p-5">
         <ResponsiveContainer width="100%" height="100%">
