@@ -97,3 +97,46 @@ def test_walk_forward_uses_target_embargo():
         train_to=pd.Timestamp(fold["train_to"])
         test_from=pd.Timestamp(fold["test_from"])
         assert pos[test_from]-pos[train_to]>=20
+
+
+def test_meta_v4_is_long_only_low_turnover_and_benchmarked():
+    from app.services.backtest import run_meta_v4,run_backtest,V4_FEATURE_WEIGHTS
+    from app.services.features import FEATURES
+    dates=pd.bdate_range("2023-01-02",periods=380)
+    symbols=[f"S{i:02d}" for i in range(20)]
+    rows=[]
+    for si,s in enumerate(symbols):
+        for i,d in enumerate(dates):
+            px=80+si*2+i*(.04+.002*si)
+            row={"date":d,"symbol":s,"sector":"Test","open":px,"close":px,
+                 "meta_score":1-si/20,"future_relative_20d":0}
+            for fi,f in enumerate(FEATURES):
+                row[f]=max(.001,min(.999,1-(si/25)+(fi*.001)))
+            rows.append(row)
+    panel=pd.DataFrame(rows)
+    v4=run_meta_v4(panel=panel)
+    assert v4["strategy"]=="META Long-Only Low-Turnover v4"
+    assert v4["params"]["short_count"]==0
+    assert v4["params"]["rebalance_days"]==10
+    assert v4["params"]["rank_buffer"]==5
+    assert not any(o["action"] in ("SHORT","COVER") for o in v4["order_ledger"])
+    assert not any(x["side"]=="SHORT" for x in v4["position_ledger"])
+    assert "benchmark_cagr" in v4["metrics"]
+    assert v4["dataset"]["backtest_from"]<v4["dataset"]["backtest_to"]
+    assert set(v4["score_weights"])==set(V4_FEATURE_WEIGHTS)
+
+def test_no_trade_band_reduces_resize_churn():
+    from app.services.backtest import run_backtest
+    dates=pd.bdate_range("2023-01-02",periods=360)
+    rows=[]
+    for si,s in enumerate(["A","B","C","D"]):
+        for i,d in enumerate(dates):
+            px=100+si*3+i*(.02+.001*si)
+            rows.append({"date":d,"symbol":s,"sector":"Test","open":px,"close":px,
+                         "meta_score":1-si/4,"momentum_12_1_rank":1-si/4,"future_relative_20d":0})
+    panel=pd.DataFrame(rows)
+    noisy=run_backtest({"long_count":2,"short_count":0,"gross_exposure":1,"rebalance_days":5},panel=panel)
+    buffered=run_backtest({"long_count":2,"short_count":0,"gross_exposure":1,"rebalance_days":5,
+                           "rank_buffer":1,"rebalance_threshold_pct":.20,"min_trade_notional":100},panel=panel)
+    assert len(buffered["order_ledger"])<=len(noisy["order_ledger"])
+    assert buffered["metrics"]["estimated_costs_usd"]<=noisy["metrics"]["estimated_costs_usd"]
