@@ -36,7 +36,7 @@ V6_PORTFOLIO = {
     "normalize_position_scale": False,
 }
 
-V6_CACHE_VERSION = "v6-aligned-solid-v4-1"
+V6_CACHE_VERSION = "v6-aligned-solid-v4-2"
 
 V6_CONFIG = {
     "holding_days": 10,
@@ -54,6 +54,7 @@ V6_CONFIG = {
     "long_count_grid": [8, 10, 12, 15],
     # 6 bps commission + 5 bps slippage on entry and exit.
     "round_trip_cost_bps": 22.0,
+    "min_cross_section_names": 20,
 }
 
 
@@ -461,7 +462,12 @@ def build_meta_v6_oos(
             return cached_scored,cached_research
 
     eligible_mask=source["solid_eligible"].fillna(False).astype(bool) if "solid_eligible" in source.columns else pd.Series(True,index=source.index)
-    labelled = source[eligible_mask].dropna(
+    eligible_source=source[eligible_mask].copy()
+    eligible_counts=eligible_source.groupby("date")["symbol"].nunique()
+    valid_cross_section_dates=set(
+        eligible_counts[eligible_counts>=int(V6_CONFIG["min_cross_section_names"])].index
+    )
+    labelled = eligible_source[eligible_source["date"].isin(valid_cross_section_dates)].dropna(
         subset=MODEL_FEATURES + ["v6_future_relative_return", "v6_future_open_return"]
     ).copy()
     all_dates = np.array(sorted(source["date"].unique()))
@@ -554,7 +560,7 @@ def build_meta_v6_oos(
         current = by_date[signal_date].dropna(subset=MODEL_FEATURES).copy()
         if "solid_eligible" in current.columns:
             current=current[current["solid_eligible"].fillna(False).astype(bool)].copy()
-        if current.empty:
+        if len(current)<int(V6_CONFIG["min_cross_section_names"]):
             continue
 
         current_pred = _blend_raw(_predict_base(live_models, current), router)
@@ -628,6 +634,7 @@ def build_meta_v6_oos(
             "meta_labeler": "absolute net-positive trade filter + Platt calibration",
             "portfolio_search": "validation-only threshold + max position count",
             "position_sizing": "calibrated probability, 10%-100% scale, no forced full exposure",
+            "min_cross_section_names": int(V6_CONFIG["min_cross_section_names"]),
             "historical_news": "excluded",
         },
         "oos_mean_rank_ic": round(float(daily.mean()), 5) if len(daily) else None,
