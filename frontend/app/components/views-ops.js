@@ -3,7 +3,7 @@
 import { CheckCircle2, ShieldAlert, ShieldCheck, RefreshCcw } from 'lucide-react'
 import { Badge, Empty, Panel, PanelHeader, SectionHeading, Stat, TableWrap, cn, tdClass, thClass, tableClass } from './ui'
 import { Button, JOB_LABELS } from './shell'
-import { money, num, pct, safeArray, shortDate } from '../lib/format'
+import { money, num, pct, price, safeArray, shortDate } from '../lib/format'
 
 export function PaperView({snapshot}){
   const paper=snapshot?.paper||{}
@@ -49,7 +49,7 @@ export function PaperView({snapshot}){
           {!orders.length?<Empty>Aucun ordre.</Empty>:orders.slice(0,16).map((row,i)=><div key={row.client_order_id||i} className="flex items-center gap-3 border-b border-white/5 px-5 py-3 text-xs"><b className="w-14 text-white">{row.symbol}</b><span className="w-12 text-slate-500">{row.side}</span><span className="flex-1 text-slate-400">{money(row.notional)}</span><Badge tone={row.status==='filled'?'good':'neutral'}>{row.status}</Badge></div>)}
         </div>
         <div>
-          {!fills.length?<Empty>Aucun fill.</Empty>:fills.slice(0,16).map(row=><div key={row.id} className="flex items-center gap-3 border-b border-white/5 px-5 py-3 text-xs"><b className="w-14 text-white">{row.symbol}</b><span className="w-12 text-slate-500">{row.side}</span><span className="flex-1 text-slate-400">{num(row.qty,3)} @ {money(row.price)}</span><span className="text-slate-600">{shortDate(row.created_at)}</span></div>)}
+          {!fills.length?<Empty>Aucun fill.</Empty>:fills.slice(0,16).map(row=><div key={row.id} className="flex items-center gap-3 border-b border-white/5 px-5 py-3 text-xs"><b className="w-14 text-white">{row.symbol}</b><span className="w-12 text-slate-500">{row.side}</span><span className="flex-1 text-slate-400">{num(row.qty,3)} @ {price(row.price)}</span><span className="text-slate-600">{shortDate(row.created_at)}</span></div>)}
         </div>
       </div>
     </Panel>
