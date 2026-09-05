@@ -213,6 +213,7 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
                 "qty":round(abs(qty),6),
                 "entry_notional_usd":round(abs(qty*p0),2),
                 "asset_return":round(float(asset_ret),6),
+                "position_return":round(float(asset_ret if w>0 else -asset_ret),6),
                 "gross_pnl_usd":round(float(symbol_gross),2),
                 "estimated_cost_usd":round(symbol_cost,2),
                 "net_pnl_usd":round(float(symbol_net),2)
