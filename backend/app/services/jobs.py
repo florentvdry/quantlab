@@ -96,7 +96,7 @@ def execute_job(key:str):
             update(db,row,progress=20,result_json=json.dumps({"message":"Calcul des IC cross-sectionnels"})); result=factor_summary()
         elif row.kind=="VALIDATION":
             from app.services.validation import validation_report
-            update(db,row,progress=15,result_json=json.dumps({"message":"Baseline, OOS et validation gate"})); result=validation_report(p)
+            update(db,row,progress=15,result_json=json.dumps({"message":"META V5 validation gate"})); result=validation_report(p)
         elif row.kind=="DATA_REFRESH":
             from app.services.real_data import fetch_bars
             update(db,row,progress=20,result_json=json.dumps({"message":"Téléchargement des barres Alpaca"}))
