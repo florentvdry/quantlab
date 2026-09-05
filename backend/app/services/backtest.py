@@ -152,6 +152,40 @@ def _split_order(symbol,prev_qty,target_qty,price,date,rebalance_id,cost_rate):
         add("SELL" if prev_qty>0 else "SHORT",prev_qty-target_qty)
     return orders
 
+def _first_existing(columns,*names):
+    for name in names:
+        if name in columns:
+            return name
+    return None
+
+def _mode_or_none(series):
+    x=series.dropna()
+    if x.empty:return None
+    mode=x.mode()
+    return None if mode.empty else str(mode.iloc[0])
+
+def _portfolio_risk_snapshot(returns_matrix,signal_d,weights,lookback=63):
+    symbols=[s for s,w in weights.items() if abs(float(w))>1e-12 and s in returns_matrix.columns]
+    if not symbols:
+        return {"avg_pair_corr":None,"max_pair_corr":None,"portfolio_vol":None}
+    hist=returns_matrix.loc[returns_matrix.index<=signal_d,symbols].tail(int(lookback))
+    if len(hist)<10:
+        return {"avg_pair_corr":None,"max_pair_corr":None,"portfolio_vol":None}
+    corr=hist.corr(min_periods=max(5,min(20,len(hist)//2)))
+    pair_values=[]
+    if len(symbols)>1:
+        arr=corr.to_numpy(dtype=float)
+        tri=arr[np.triu_indices_from(arr,k=1)]
+        pair_values=tri[np.isfinite(tri)].tolist()
+    weight_series=pd.Series({s:float(weights[s]) for s in symbols})
+    port=hist[symbols].fillna(0.0).mul(weight_series,axis=1).sum(axis=1)
+    vol=float(port.std(ddof=1)*math.sqrt(252)) if len(port)>1 else np.nan
+    return {
+        "avg_pair_corr":None if not pair_values else round(float(np.mean(pair_values)),4),
+        "max_pair_corr":None if not pair_values else round(float(np.max(pair_values)),4),
+        "portfolio_vol":None if not np.isfinite(vol) else round(vol,4),
+    }
+
 def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="META US v2",panel=None,adaptive=False,position_scale_column=None)->dict:
     p=DEFAULTS|(params or {})
     df=(build_feature_panel() if panel is None else panel).copy().sort_values(["date","symbol"])
@@ -165,6 +199,9 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
     initial_capital=float(p.get("initial_capital",100000))
     by_date={d:x.set_index("symbol") for d,x in df.groupby("date")}
     date_pos={d:i for i,d in enumerate(all_dates)}
+    risk_source=df[["date","symbol","close"]].drop_duplicates(["date","symbol"]).sort_values(["symbol","date"]).copy()
+    risk_source["_ret_1d"]=risk_source.groupby("symbol")["close"].pct_change(fill_method=None)
+    risk_returns=risk_source.pivot(index="date",columns="symbol",values="_ret_1d").sort_index()
     ic_frame=_daily_ic_frame(df) if adaptive else None
     adaptive_eval_ic=[]
     total_cost_rate=(float(p["commission_bps"])+float(p["slippage_bps"]))/10000
@@ -271,6 +308,7 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
                 target_qty[s]=prev
 
         period_trade_notional_usd=0.0
+        period_trade_count=0
         for s in set(prev_qty)|set(target_qty):
             price=None
             if s in entry.index:price=float(entry.loc[s,"open"])
@@ -281,17 +319,65 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
                 str(pd.Timestamp(entry_d).date()),rebalance_id,total_cost_rate
             )
             orders.extend(generated)
+            period_trade_count+=len(generated)
             period_trade_notional_usd+=sum(float(x["notional_usd"]) for x in generated)
             entry_cost_by_symbol[s]=sum(x["estimated_cost_usd"] for x in generated)
 
         period_cost_usd=float(sum(entry_cost_by_symbol.values()))
         turnover=period_trade_notional_usd/max(equity_before_usd,1e-12)
 
+        entry_weights={}
+        for s,qty in target_qty.items():
+            if s in entry.index:
+                entry_weights[s]=float(qty)*float(entry.loc[s,"open"])/max(equity_before_usd,1e-12)
+        gross_exposure=float(sum(abs(w) for w in entry_weights.values()))
+        net_exposure=float(sum(entry_weights.values()))
+        cash_pct=float(1.0-gross_exposure)
+        largest_weight=max((abs(w) for w in entry_weights.values()),default=0.0)
+        risk_diag=_portfolio_risk_snapshot(risk_returns,signal_d,entry_weights,lookback=63)
+
+        selected_symbols=[s for s in entry_weights if s in snap.index]
+        selected_signal=snap.loc[selected_symbols] if selected_symbols else snap.iloc[0:0]
+        prob_col=_first_existing(snap.columns,"v7_meta_probability","v6_meta_probability","v5_meta_probability")
+        threshold_col=_first_existing(snap.columns,"v7_threshold","v6_threshold","v5_threshold")
+        regime_col=_first_existing(snap.columns,"v7_regime","v6_regime","v5_regime")
+        avg_meta_probability=None
+        if prob_col and not selected_signal.empty:
+            values=pd.to_numeric(selected_signal[prob_col],errors="coerce").replace([np.inf,-np.inf],np.nan).dropna()
+            if len(values):avg_meta_probability=round(float(values.mean()),4)
+        meta_threshold=None
+        if threshold_col and not selected_signal.empty:
+            values=pd.to_numeric(selected_signal[threshold_col],errors="coerce").replace([np.inf,-np.inf],np.nan).dropna()
+            if len(values):meta_threshold=round(float(values.median()),4)
+        regime=_mode_or_none(selected_signal[regime_col]) if regime_col and not selected_signal.empty else None
+        avg_signal_score=None
+        if not selected_signal.empty and active_score in selected_signal.columns:
+            values=pd.to_numeric(selected_signal[active_score],errors="coerce").replace([np.inf,-np.inf],np.nan).dropna()
+            if len(values):avg_signal_score=round(float(values.mean()),5)
+
+        period_context={
+            "signal_date":str(pd.Timestamp(signal_d).date()),
+            "entry_date":str(pd.Timestamp(entry_d).date()),
+            "exit_date":str(pd.Timestamp(exit_d).date()),
+            "gross_exposure":round(gross_exposure,4),
+            "net_exposure":round(net_exposure,4),
+            "cash_pct":round(cash_pct,4),
+            "position_count":int(len(entry_weights)),
+            "candidate_count":int(len(snap)),
+            "largest_weight":round(float(largest_weight),4),
+            "avg_meta_probability":avg_meta_probability,
+            "meta_threshold":meta_threshold,
+            "regime":regime,
+            "avg_signal_score":avg_signal_score,
+            "avg_pair_corr":risk_diag["avg_pair_corr"],
+            "max_pair_corr":risk_diag["max_pair_corr"],
+            "portfolio_vol":risk_diag["portfolio_vol"],
+            "active_symbols":sorted(entry_weights.keys()),
+        }
+
         # Daily account curve for the UI. "Balance" is realized account value
         # (unchanged while the current period is open, except entry costs), while
-        # "Equity" marks the open positions to each session's open. We exclude
-        # exit_d here because it is also the next period's entry date; the next
-        # iteration will record that date after its own entry costs.
+        # "Equity" marks the open positions to each session's open.
         realized_balance_usd=equity_before_usd-period_cost_usd
         for mark_i in range(ep,xp):
             mark_d=all_dates[mark_i]
@@ -312,12 +398,17 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
             if not invested:
                 continue
             mark_equity=realized_balance_usd+floating_gross
+            is_entry=mark_i==ep
             account_curve.append({
                 "date":str(pd.Timestamp(mark_d).date()),
                 "equity_usd":round(float(mark_equity),2),
                 "balance_usd":round(float(realized_balance_usd),2),
                 "floating_pnl_usd":round(float(floating_gross),2),
                 "rebalance_id":rebalance_id,
+                "turnover":round(float(turnover),4) if is_entry else 0.0,
+                "cost_usd":round(float(period_cost_usd),2) if is_entry else 0.0,
+                "trade_count":int(period_trade_count) if is_entry else 0,
+                **period_context,
             })
 
         common=entry.index.intersection(exit_.index)
@@ -378,25 +469,58 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
             "cost_usd":round(period_cost_usd,2),
             "net_pnl_usd":round(gross_pnl_usd-period_cost_usd,2),
             "equity_after_usd":round(equity_after_usd,2),
+            "gross_exposure":period_context["gross_exposure"],
+            "cash_pct":period_context["cash_pct"],
+            "position_count":period_context["position_count"],
+            "avg_meta_probability":period_context["avg_meta_probability"],
+            "meta_threshold":period_context["meta_threshold"],
+            "regime":period_context["regime"],
+            "avg_pair_corr":period_context["avg_pair_corr"],
+            "max_pair_corr":period_context["max_pair_corr"],
+            "portfolio_vol":period_context["portfolio_vol"],
+            "largest_weight":period_context["largest_weight"],
+            "trade_count":int(period_trade_count),
             "adaptive_factors":adaptive_diag if adaptive else None
         })
         turnovers.append(turnover);gross_pnl.append(gross_ret);costs.append(cost_ret)
-        actual_weights={}
-        for s,qty in target_qty.items():
-            if s in entry.index:
-                actual_weights[s]=float(qty)*float(entry.loc[s,"open"])/max(equity_before_usd,1e-12)
-        prev_weights=actual_weights;prev_qty=target_qty
+        prev_weights=entry_weights;prev_qty=target_qty
 
     if rebalances:
         # Final close/mark: no open-period floating P&L remains at the end of the
         # simulated history, so balance and equity converge.
-        account_curve.append({
+        final_context=dict(account_curve[-1]) if account_curve else {}
+        final_context.update({
             "date":rebalances[-1]["exit_date"],
             "equity_usd":rebalances[-1]["equity_after_usd"],
             "balance_usd":rebalances[-1]["equity_after_usd"],
             "floating_pnl_usd":0.0,
             "rebalance_id":rebalances[-1]["rebalance_id"],
+            "turnover":0.0,
+            "cost_usd":0.0,
+            "trade_count":0,
         })
+        account_curve.append(final_context)
+
+    # Make the account journal strict, unique by date and analytically useful.
+    # Daily P&L/return are derived from mark-to-market equity, not rebalance P&L.
+    if account_curve:
+        dedup={row["date"]:row for row in account_curve}
+        account_curve=[dedup[d] for d in sorted(dedup)]
+        previous_equity=initial_capital
+        previous_balance=initial_capital
+        running_peak=initial_capital
+        for row in account_curve:
+            current_equity=float(row["equity_usd"])
+            current_balance=float(row["balance_usd"])
+            daily_pnl=current_equity-previous_equity
+            daily_return=current_equity/max(previous_equity,1e-12)-1.0
+            running_peak=max(running_peak,current_equity)
+            row["daily_pnl_usd"]=round(float(daily_pnl),2)
+            row["daily_return"]=round(float(daily_return),6)
+            row["drawdown"]=round(float(current_equity/max(running_peak,1e-12)-1.0),6)
+            row["balance_change_usd"]=round(float(current_balance-previous_balance),2)
+            previous_equity=current_equity
+            previous_balance=current_balance
 
     metrics=_metrics(curve,equity,turnovers,252/int(p["rebalance_days"]),positions)
     metrics["gross_return_sum"]=round(float(np.sum(gross_pnl)),4)
