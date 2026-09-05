@@ -15,6 +15,7 @@ export const NAV=[
 export const JOB_LABELS={
   AUTO_BOOTSTRAP:'Autopilot QuantLab',
   META_V5:'META Ensemble V5',
+  META_V6:'META Ensemble V6',
   META_V5_SIGNALS:'META V5 Signals',
   VALIDATION:'Validation Gate',
   FACTOR_SUMMARY:'Factor Research',
