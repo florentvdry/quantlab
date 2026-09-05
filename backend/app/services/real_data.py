@@ -163,9 +163,13 @@ def _sec_operating_quality(symbols):
         balance_ok=np.isfinite(assets) and assets>0 and np.isfinite(equity) and equity>0
         activity_ok=(np.isfinite(revenue) and revenue>0) or np.isfinite(net_income)
         earning_power=(np.isfinite(net_income) and net_income>0) or (np.isfinite(operating_cf) and operating_cf>0)
+        size_ok=(
+            (np.isfinite(revenue) and revenue>=float(settings.real_universe_min_revenue))
+            or (np.isfinite(assets) and assets>=float(settings.real_universe_min_assets))
+        )
         eligible=(
             coverage>=int(settings.real_universe_min_sec_core_metrics)
-            and balance_ok and activity_ok and earning_power
+            and balance_ok and activity_ok and size_ok
         )
         rows.append({
             "symbol":symbol,
@@ -173,6 +177,7 @@ def _sec_operating_quality(symbols):
             "sec_balance_ok":bool(balance_ok),
             "sec_activity_ok":bool(activity_ok),
             "sec_earning_power":bool(earning_power),
+            "sec_size_ok":bool(size_ok),
             "sec_operating_company":bool(eligible),
         })
     return pd.DataFrame(rows)
@@ -235,7 +240,8 @@ def _quality_rank_universe(candidates):
             "max_volatility_60":float(settings.real_universe_max_volatility),
             "min_sec_core_metrics":int(settings.real_universe_min_sec_core_metrics),
             "requires_positive_equity":True,
-            "requires_positive_net_income_or_operating_cf":True,
+            "min_revenue_or_assets":[float(settings.real_universe_min_revenue),float(settings.real_universe_min_assets)],
+            "profitability_is_ranking_signal_not_hard_gate":True,
         },
         "top":[
             {
@@ -271,7 +277,7 @@ def universe(force=False):
             syms=cached.get("symbols",[])
             if (
                 syms
-                and cached.get("mode")=="quality_operating_v3"
+                and cached.get("mode")=="quality_operating_v4"
                 and int(cached.get("requested_size",0))==int(settings.real_universe_size)
             ):
                 return syms[:settings.real_universe_size]
@@ -290,7 +296,7 @@ def universe(force=False):
 
     tmp=path+".tmp"
     with open(tmp,"w",encoding="utf-8") as fh:
-        json.dump({"date":date.today().isoformat(),"mode":"quality_operating_v3","requested_size":int(settings.real_universe_size),"symbols":syms},fh)
+        json.dump({"date":date.today().isoformat(),"mode":"quality_operating_v4","requested_size":int(settings.real_universe_size),"symbols":syms},fh)
     os.replace(tmp,path)
     return syms
 
