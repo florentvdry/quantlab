@@ -10,5 +10,5 @@ httpx==0.28.1
 redis==6.4.0
 pyarrow==21.0.0
 scikit-learn==1.7.1
-
 websockets==15.0.1
+pytest==8.4.1
