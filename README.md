@@ -96,7 +96,7 @@ Le moteur vise désormais ~160 sociétés US opérationnelles établies, avec as
 - médiane dollar-volume 60j >= 30 M USD/jour ;
 - volatilité annualisée 60j <= 80 % ;
 - présence de fondamentaux SEC exploitables ;
-- actifs et capitaux propres positifs ;
+- actifs positifs et equity connu, avec garde-fou contre les bilans fortement négatifs (equity > -50 % des actifs) ;
 - taille économique minimale : revenu >= 1 Md USD ou actifs >= 5 Md USD ;
 - la profitabilité reste un facteur de qualité, mais n'est plus un hard gate qui élimine une grande société pendant une année faible ;
 - ETF/ETN/funds/warrants/rights/units exclus, avec exclusions explicites des principaux sponsors de produits leveraged/inverse ;
