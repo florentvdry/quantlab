@@ -55,9 +55,16 @@ def feature_status():return feature_store_status()
 
 @app.get("/api/system/status")
 def system_status():
+    try:
+        r=Redis.from_url(settings.redis_url,decode_responses=True)
+        worker_online=bool(r.get("quantlab:worker:heartbeat"))
+        queue_depth=int(r.llen("quantlab:jobs"))
+    except Exception:
+        worker_online=False;queue_depth=None
     return {"data_mode":settings.data_mode,"alpaca_configured":bool(settings.alpaca_api_key and settings.alpaca_secret_key),
             "paper_orders_enabled":settings.allow_alpaca_paper_orders,"paper_auto_enabled":settings.paper_auto_enabled,
-            "trading_env":settings.trading_env,"live_trading_supported":False}
+            "trading_env":settings.trading_env,"live_trading_supported":False,
+            "worker_online":worker_online,"queue_depth":queue_depth}
 
 @app.get("/api/setup")
 def setup(db:Session=Depends(get_db)):
@@ -69,10 +76,11 @@ def setup(db:Session=Depends(get_db)):
         {"name":"Historical Dataset","ok":"market_data" in s or settings.data_mode=="synthetic","detail":s.get("market_data")},
         {"name":"Feature Store","ok":fs["ready"],"detail":fs},
         {"name":"Data Quality","ok":fs["ready"] and dq_state.get("status")=="PASS","detail":dq_state if fs["ready"] else {"status":"NOT_READY","message":fs["message"]}},
+        {"name":"Worker","ok":system_status().get("worker_online",False),"detail":{"queue_depth":system_status().get("queue_depth")}},
         {"name":"Strategy","ok":db.query(StrategyVersion).count()>0,"detail":db.query(StrategyVersion).count()},
         {"name":"Paper Trading","ok":bool(db.query(StrategyVersion).filter(StrategyVersion.status=="PAPER").first()),"detail":"locked unless validated"},
     ]
-    return {"steps":steps,"research_unlocked":all(x["ok"] for x in steps[:4]),"paper_locked":not steps[-1]["ok"] or not settings.allow_alpaca_paper_orders,"feature_store":fs}
+    return {"steps":steps,"research_unlocked":all(x["ok"] for x in steps[:5]),"paper_locked":not steps[-1]["ok"] or not settings.allow_alpaca_paper_orders,"feature_store":fs}
 
 @app.get("/api/dashboard")
 def dashboard(db:Session=Depends(get_db)):
