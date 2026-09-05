@@ -4,7 +4,7 @@ import { RefreshCcw } from 'lucide-react'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Badge, Empty, Panel, PanelHeader, SectionHeading, TableWrap, cn, tdClass, thClass, tableClass } from './ui'
 import { Button } from './shell'
-import { money, num, pct, safeArray, shortDate } from '../lib/format'
+import { money, num, pct, price, safeArray, shortDate } from '../lib/format'
 
 function BacktestDetail({detail}){
   if(!detail)return <Panel><Empty>Sélectionne un backtest pour ouvrir son audit complet.</Empty></Panel>
@@ -52,7 +52,7 @@ function BacktestDetail({detail}){
             <td className={tdClass}>{row.signal_date}</td><td className={tdClass}>{row.entry_date}</td><td className={tdClass}>{row.exit_date}</td>
             <td className={cn(tdClass,'font-semibold text-white')}>{row.symbol}</td>
             <td className={cn(tdClass,row.side==='LONG'?'text-emerald-300':'text-rose-300')}>{row.side}</td>
-            <td className={tdClass}>{money(row.entry_price)}</td><td className={tdClass}>{money(row.exit_price)}</td><td className={tdClass}>{num(row.qty,3)}</td>
+            <td className={tdClass}>{price(row.entry_price)}</td><td className={tdClass}>{price(row.exit_price)}</td><td className={tdClass}>{num(row.qty,3)}</td>
             <td className={cn(tdClass,Number(row.position_return)>=0?'text-emerald-300':'text-rose-300')}>{pct(row.position_return)}</td>
             <td className={cn(tdClass,Number(row.net_pnl_usd)>=0?'text-emerald-300':'text-rose-300')}>{money(row.net_pnl_usd)}</td>
           </tr>)}</tbody>
@@ -63,7 +63,7 @@ function BacktestDetail({detail}){
     <div className="grid gap-4 xl:grid-cols-2">
       <Panel>
         <PanelHeader title={'Ordres simulés · '+orders.length} eyebrow="Execution ledger"/>
-        {!orders.length?<Empty>Aucun ordre disponible.</Empty>:<TableWrap className="max-h-[360px]"><table className={cn(tableClass,'min-w-[760px]')}><thead className="sticky top-0 bg-[#0f1217]"><tr><th className={thClass}>Date</th><th className={thClass}>Symbol</th><th className={thClass}>Action</th><th className={thClass}>Price</th><th className={thClass}>Qty</th><th className={thClass}>Cost</th></tr></thead><tbody>{orders.slice().reverse().slice(0,300).map((row,i)=><tr key={(row.rebalance_id||i)+'-'+row.symbol+'-'+i}><td className={tdClass}>{row.date}</td><td className={cn(tdClass,'font-semibold text-white')}>{row.symbol}</td><td className={tdClass}>{row.action}</td><td className={tdClass}>{money(row.price)}</td><td className={tdClass}>{num(row.qty,3)}</td><td className={tdClass}>{money(row.estimated_cost_usd)}</td></tr>)}</tbody></table></TableWrap>}
+        {!orders.length?<Empty>Aucun ordre disponible.</Empty>:<TableWrap className="max-h-[360px]"><table className={cn(tableClass,'min-w-[760px]')}><thead className="sticky top-0 bg-[#0f1217]"><tr><th className={thClass}>Date</th><th className={thClass}>Symbol</th><th className={thClass}>Action</th><th className={thClass}>Price</th><th className={thClass}>Qty</th><th className={thClass}>Cost</th></tr></thead><tbody>{orders.slice().reverse().slice(0,300).map((row,i)=><tr key={(row.rebalance_id||i)+'-'+row.symbol+'-'+i}><td className={tdClass}>{row.date}</td><td className={cn(tdClass,'font-semibold text-white')}>{row.symbol}</td><td className={tdClass}>{row.action}</td><td className={tdClass}>{price(row.price)}</td><td className={tdClass}>{num(row.qty,3)}</td><td className={tdClass}>{money(row.estimated_cost_usd)}</td></tr>)}</tbody></table></TableWrap>}
       </Panel>
       <Panel>
         <PanelHeader title={'Rebalances · '+rebalances.length} eyebrow="Portfolio lifecycle"/>
