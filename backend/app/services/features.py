@@ -5,7 +5,7 @@ import pandas as pd
 from app.core.config import settings
 from app.services.data import synthetic_panel
 
-FEATURE_SCHEMA_VERSION="5"
+FEATURE_SCHEMA_VERSION="6"
 FEATURES=["momentum_12_1_rank","ret_60d_rank","ret_20d_rank","trend_50_rank","trend_200_rank","fundamental_raw_rank","earnings_raw_rank","news_raw_rank","low_vol_rank","liquidity_rank"]
 STORE_DIR=os.getenv("QUANTLAB_DATA_DIR","/data");STORE_PATH=f"{STORE_DIR}/feature_store.parquet";META_PATH=f"{STORE_DIR}/feature_store.json"
 _PANEL_CACHE=None;_PANEL_CACHE_AT=0.0
@@ -21,6 +21,16 @@ def _technical(df):
     df["vol_60d"]=daily.groupby(df["symbol"]).rolling(60).std().reset_index(level=0,drop=True)*np.sqrt(252)
     df["sma_50"]=g["close"].rolling(50).mean().reset_index(level=0,drop=True);df["sma_200"]=g["close"].rolling(200).mean().reset_index(level=0,drop=True)
     df["trend_50"]=df["close"]/df["sma_50"]-1;df["trend_200"]=df["close"]/df["sma_200"]-1;df["dollar_volume"]=df["close"]*df["volume"]
+    df["median_dollar_volume_60"]=df.groupby("symbol")["dollar_volume"].rolling(60,min_periods=40).median().reset_index(level=0,drop=True)
+    df["history_sessions_to_date"]=df.groupby("symbol").cumcount()+1
+    base_elig=df.get("solid_fundamental_eligible",pd.Series(False,index=df.index)).fillna(False).astype(bool)
+    df["solid_eligible"]=(
+        base_elig
+        &df["close"].ge(float(settings.real_universe_min_price))
+        &df["history_sessions_to_date"].ge(int(settings.real_trade_min_history_sessions))
+        &df["median_dollar_volume_60"].ge(float(settings.real_universe_min_median_dollar_volume))
+        &df["vol_60d"].le(float(settings.real_universe_max_volatility))
+    ).fillna(False)
     return df
 
 def _source_panel():
@@ -34,8 +44,11 @@ def _source_panel():
         df.loc[mask,"news_raw"]=df.loc[mask,"symbol"].map(ns).fillna(0.0)
         from app.services.sec_fundamentals import point_in_time_panel
         pit=point_in_time_panel(sorted(df.symbol.unique()),sorted(df.date.unique()))
-        if not pit.empty:df=df.merge(pit[["date","symbol","fundamental_raw","earnings_raw"]],on=["date","symbol"],how="left")
-        else:df["fundamental_raw"]=np.nan;df["earnings_raw"]=np.nan
+        if not pit.empty:
+            keep=["date","symbol","fundamental_raw","earnings_raw","solid_fundamental_eligible","sec_core_metrics"]
+            df=df.merge(pit[[x for x in keep if x in pit.columns]],on=["date","symbol"],how="left")
+        else:
+            df["fundamental_raw"]=np.nan;df["earnings_raw"]=np.nan;df["solid_fundamental_eligible"]=False;df["sec_core_metrics"]=0
         df["fundamental_raw"]=df["fundamental_raw"].fillna(df.groupby("date")["fundamental_raw"].transform("median")).fillna(0.0);df["earnings_raw"]=df["earnings_raw"].fillna(0.0)
         return df
     return synthetic_panel().copy()
@@ -105,7 +118,9 @@ def panel_metadata(df=None):
     df=build_feature_panel() if df is None else df
     payload={"mode":settings.data_mode.lower(),"feed":settings.alpaca_feed if settings.data_mode.lower()=="alpaca" else "synthetic","schema":FEATURE_SCHEMA_VERSION,
              "rows":int(len(df)),"symbols":int(df.symbol.nunique()),"from":str(pd.Timestamp(df.date.min()).date()),"to":str(pd.Timestamp(df.date.max()).date()),
-             "historical_news":"neutral_no_point_in_time_history"}
+             "historical_news":"neutral_no_point_in_time_history",
+             "solid_eligible_rows":int(df["solid_eligible"].sum()) if "solid_eligible" in df.columns else None,
+             "solid_eligible_symbols_latest":int(df[df["date"].eq(df["date"].max())&df.get("solid_eligible",False)]["symbol"].nunique()) if "solid_eligible" in df.columns else None}
     if settings.data_mode.lower()=="alpaca":
         from app.services.real_data import market_data_metadata
         market=market_data_metadata()
