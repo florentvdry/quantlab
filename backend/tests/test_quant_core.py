@@ -347,3 +347,80 @@ def test_meta_v6_continuous_builder_uses_execution_aligned_labels(monkeypatch):
     refresh=summary["refreshes"][0]
     assert refresh["meta"]["selected_long_count"] in (5,8)
     assert refresh["meta"]["selected_threshold"] in (0.50,0.60)
+
+
+def test_backtest_single_name_weight_cap_leaves_cash():
+    from app.services.backtest import run_backtest
+    dates=pd.bdate_range("2026-01-02",periods=40)
+    rows=[]
+    for si,symbol in enumerate(["A","B","C"]):
+        for i,d in enumerate(dates):
+            rows.append({
+                "date":d,"symbol":symbol,"sector":"Test",
+                "open":100+si+i*.1,"close":100+si+i*.1,
+                "score":1-si*.1,"scale":1.0,"future_relative_20d":0.0,
+            })
+    panel=pd.DataFrame(rows)
+    result=run_backtest(
+        {
+            "long_count":2,"short_count":0,"rebalance_days":10,
+            "gross_exposure":1.0,"long_gross":1.0,
+            "min_long_count":1,"normalize_position_scale":False,
+            "max_abs_weight":0.10,
+        },
+        score_column="score",
+        strategy_name="weight-cap",
+        panel=panel,
+        position_scale_column="scale",
+    )
+    assert result["position_ledger"]
+    assert max(abs(float(x["weight"])) for x in result["position_ledger"])<=0.100001
+
+
+def test_v7_diversification_rejects_highly_correlated_duplicate():
+    from app.services.meta_v7 import _diversified_symbols
+
+    corr=pd.DataFrame(
+        [
+            [1.0,.95,.10,.20],
+            [.95,1.0,.15,.25],
+            [.10,.15,1.0,.30],
+            [.20,.25,.30,1.0],
+        ],
+        index=["A","B","C","D"],
+        columns=["A","B","C","D"],
+    )
+    selected,diag=_diversified_symbols(
+        ["A","B","C","D"],corr,max_names=3,corr_cap=.82,min_names=2
+    )
+    assert "A" in selected
+    assert "B" not in selected
+    assert "C" in selected
+    assert diag["B"]>.82
+
+
+def test_v7_market_risk_scale_is_one_sided():
+    from app.services import meta_v7
+
+    dates=pd.bdate_range("2025-01-02",periods=120)
+    rows=[]
+    for si,symbol in enumerate(["A","B","C","D"]):
+        price=100+si
+        for i,d in enumerate(dates):
+            shock=.001*((i%5)-2)
+            price*=1+shock
+            rows.append({"date":d,"symbol":symbol,"close":price})
+    base=pd.DataFrame(rows)
+    a=meta_v7._market_risk_scale(base)
+
+    changed=base.copy()
+    future_dates=set(dates[-10:])
+    changed.loc[changed.date.isin(future_dates),"close"]*=np.linspace(1.0,1.8,changed.date.isin(future_dates).sum())
+    b=meta_v7._market_risk_scale(changed)
+
+    cutoff=dates[-11]
+    assert np.allclose(
+        a.loc[a.index<=cutoff].to_numpy(),
+        b.loc[b.index<=cutoff].to_numpy(),
+        equal_nan=True,
+    )
