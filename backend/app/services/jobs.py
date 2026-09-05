@@ -11,6 +11,7 @@ from app.services.research import train_walk_forward, factor_summary, run_model_
 from app.services.meta_v5 import run_meta_v5, latest_meta_v5_signals
 
 QUEUE="quantlab:jobs"
+WORKER_HEARTBEAT="quantlab:worker:heartbeat"
 
 RESEARCH_JOB_KINDS={
     "BACKTEST","META_V5","V4_BACKTEST","ADAPTIVE_BACKTEST","BASELINE",
@@ -162,5 +163,7 @@ def execute_job(key:str):
 def worker_loop():
     r=redis_client(); print("QuantLab worker ready",flush=True)
     while True:
+        r.setex(WORKER_HEARTBEAT,20,datetime.utcnow().isoformat())
         item=r.blpop(QUEUE,timeout=5)
+        r.setex(WORKER_HEARTBEAT,20,datetime.utcnow().isoformat())
         if item: execute_job(item[1])
