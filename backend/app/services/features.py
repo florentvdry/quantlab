@@ -48,6 +48,22 @@ def clear_feature_cache(remove_disk=False):
             try:os.remove(path)
             except FileNotFoundError:pass
 
+def feature_store_status():
+    expected_mode=settings.data_mode.lower()
+    base={"ready":False,"mode":expected_mode,"expected_schema":FEATURE_SCHEMA_VERSION}
+    if not os.path.exists(STORE_PATH) or not os.path.exists(META_PATH):
+        return {**base,"reason":"missing","message":"Feature Store absent. Il sera construit automatiquement au prochain job de recherche."}
+    try:
+        with open(META_PATH,encoding="utf-8") as f:meta=json.load(f)
+    except Exception as exc:
+        return {**base,"reason":"metadata_error","message":f"Feature Store metadata illisible: {exc}"}
+    if meta.get("mode")!=expected_mode:
+        return {**base,"reason":"mode_mismatch","stored":meta,"message":f"Feature Store mode={meta.get('mode')} au lieu de {expected_mode}."}
+    if str(meta.get("schema"))!=str(FEATURE_SCHEMA_VERSION):
+        return {**base,"reason":"schema_mismatch","stored":meta,"message":f"Feature Store schema={meta.get('schema')} au lieu de {FEATURE_SCHEMA_VERSION}."}
+    age_seconds=max(0,time.time()-os.path.getmtime(STORE_PATH))
+    return {**base,"ready":True,"reason":"ready","stored":meta,"age_seconds":round(age_seconds,1),"message":"Feature Store prêt."}
+
 def _store_matches_mode():
     if not os.path.exists(STORE_PATH) or not os.path.exists(META_PATH):return False
     try:
