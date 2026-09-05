@@ -5,7 +5,7 @@ import pandas as pd
 from app.core.config import settings
 from app.services.data import synthetic_panel
 
-FEATURE_SCHEMA_VERSION="3"
+FEATURE_SCHEMA_VERSION="4"
 FEATURES=["momentum_12_1_rank","ret_60d_rank","ret_20d_rank","trend_50_rank","trend_200_rank","fundamental_raw_rank","earnings_raw_rank","news_raw_rank","low_vol_rank","liquidity_rank"]
 STORE_DIR=os.getenv("QUANTLAB_DATA_DIR","/data");STORE_PATH=f"{STORE_DIR}/feature_store.parquet";META_PATH=f"{STORE_DIR}/feature_store.json"
 _PANEL_CACHE=None;_PANEL_CACHE_AT=0.0
@@ -106,4 +106,10 @@ def panel_metadata(df=None):
     payload={"mode":settings.data_mode.lower(),"feed":settings.alpaca_feed if settings.data_mode.lower()=="alpaca" else "synthetic","schema":FEATURE_SCHEMA_VERSION,
              "rows":int(len(df)),"symbols":int(df.symbol.nunique()),"from":str(pd.Timestamp(df.date.min()).date()),"to":str(pd.Timestamp(df.date.max()).date()),
              "historical_news":"neutral_no_point_in_time_history"}
+    if settings.data_mode.lower()=="alpaca":
+        from app.services.real_data import market_data_metadata
+        market=market_data_metadata()
+        payload["requested_market_from"]=market.get("requested_start")
+        payload["raw_market_from"]=market.get("actual_from")
+        payload["raw_market_to"]=market.get("actual_to")
     raw=json.dumps(payload,sort_keys=True).encode();payload["fingerprint"]=hashlib.sha256(raw).hexdigest()[:16];return payload
