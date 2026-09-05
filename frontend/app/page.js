@@ -6,7 +6,7 @@ const API=process.env.NEXT_PUBLIC_API_URL||'http://localhost:8000'
 const pct=v=>v==null?'—':(Number(v)*100).toFixed(1)+'%'
 const num=(v,d=3)=>v==null?'—':Number(v).toFixed(d)
 const JOB_LABELS={
-  BACKTEST:'META V2 Backtest',V4_BACKTEST:'META V4 Low-Turnover',ADAPTIVE_BACKTEST:'Adaptive META V3',BASELINE:'Baseline momentum',SWEEP:'Parameter sweep',ROBUSTNESS:'Robustness',
+  BACKTEST:'META V2 Backtest',META_V5:'META Ensemble V5',V4_BACKTEST:'META V4 Low-Turnover',ADAPTIVE_BACKTEST:'Adaptive META V3',BASELINE:'Baseline momentum',SWEEP:'Parameter sweep',ROBUSTNESS:'Robustness',
   TRAIN_RIDGE:'Walk-forward Ridge',TRAIN_HGB:'Walk-forward HGB',FACTOR_SUMMARY:'Factor Research',
   VALIDATION:'Validation Gate',RIDGE_BACKTEST:'Ridge OOS Backtest',HGB_BACKTEST:'HGB OOS Backtest',DATA_REFRESH:'Market data',SEC_REFRESH:'SEC',DAILY_PIPELINE:'Daily Pipeline',
   PAPER_SNAPSHOT:'Paper Snapshot'
@@ -176,7 +176,7 @@ export default function Home(){
 
     {tab==='Models'&&<>
       <div className="two">
-        <Card title="Train / Walk-forward"><div className="actionGrid"><button className="btn" onClick={()=>postJob('/api/jobs/train/ridge','Walk-forward Ridge',{})}>Train Ridge</button><button className="btn2" onClick={()=>postJob('/api/jobs/train/hgb','Walk-forward HGB',{})}>Train HGB</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/ridge','Ridge OOS Backtest')}>Backtest Ridge OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/hgb','HGB OOS Backtest')}>Backtest HGB OOS</button></div></Card>
+        <Card title="META V5 / Walk-forward"><div className="actionGrid"><button className="btn" onClick={()=>postJob('/api/jobs/meta-v5','META Ensemble V5')}>Run META V5</button><button className="btn" onClick={()=>postJob('/api/jobs/train/ridge','Walk-forward Ridge',{})}>Train Ridge</button><button className="btn2" onClick={()=>postJob('/api/jobs/train/hgb','Walk-forward HGB',{})}>Train HGB</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/ridge','Ridge OOS Backtest')}>Backtest Ridge OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/hgb','HGB OOS Backtest')}>Backtest HGB OOS</button></div></Card>
         <Card title="Model Registry">{!models.length?<Empty>Aucun modèle entraîné.</Empty>:<table><thead><tr><th>Model</th><th>Version</th><th>Status</th><th>OOS IC</th></tr></thead><tbody>{models.map(m=><tr key={m.id}><td>{m.name}</td><td>v{m.version}</td><td>{m.status}</td><td>{num(m.metrics?.oos_mean_rank_ic??m.metrics?.test_mean_rank_ic,4)}</td></tr>)}</tbody></table>}</Card>
       </div>
     </>}
@@ -184,7 +184,7 @@ export default function Home(){
     {tab==='Backtests'&&<>
       <Card title="Strategy Builder">
         <div className="formGrid">{Object.entries(cfg).map(([k,v])=><label key={k}><span>{k}</span><input type="number" step="any" value={v} onChange={e=>setCfg({...cfg,[k]:Number(e.target.value)})}/></label>)}</div>
-        <div className="row topGap"><button className="btn" onClick={()=>postJob('/api/jobs/v4-backtest','META V4 Low-Turnover',{})}>Queue META V4</button><button className="btn2" onClick={()=>postJob('/api/jobs/adaptive-backtest','Adaptive META V3')}>Adaptive V3</button><button className="btn2" onClick={()=>postJob('/api/jobs/backtest','META V2')}>Queue META V2</button><button className="btn2" onClick={()=>postJob('/api/jobs/baseline','Momentum baseline')}>Queue Baseline</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/ridge','Ridge OOS Backtest')}>Ridge OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/hgb','HGB OOS Backtest')}>HGB OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/robustness','Robustness')}>Robustness V2</button><button className="btn2" onClick={()=>postJob('/api/jobs/sweep','Parameter Sweep',{base:cfg,grid:{long_count:[10,20,30],short_count:[10,20,30],rebalance_days:[5,10,21]}})}>Parameter Sweep</button></div>
+        <div className="row topGap"><button className="btn" onClick={()=>postJob('/api/jobs/meta-v5','META Ensemble V5')}>Queue META V5</button><button className="btn2" onClick={()=>postJob('/api/jobs/v4-backtest','META V4 Low-Turnover',{})}>META V4</button><button className="btn2" onClick={()=>postJob('/api/jobs/adaptive-backtest','Adaptive META V3')}>Adaptive V3</button><button className="btn2" onClick={()=>postJob('/api/jobs/backtest','META V2')}>Queue META V2</button><button className="btn2" onClick={()=>postJob('/api/jobs/baseline','Momentum baseline')}>Queue Baseline</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/ridge','Ridge OOS Backtest')}>Ridge OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/model-backtest/hgb','HGB OOS Backtest')}>HGB OOS</button><button className="btn2" onClick={()=>postJob('/api/jobs/robustness','Robustness')}>Robustness V2</button><button className="btn2" onClick={()=>postJob('/api/jobs/sweep','Parameter Sweep',{base:cfg,grid:{long_count:[10,20,30],short_count:[10,20,30],rebalance_days:[5,10,21]}})}>Parameter Sweep</button></div>
       </Card>
       {selectedBacktest&&<Card title={selectedBacktest.strategy} className="section">
         <div className="metricRow">
@@ -206,6 +206,16 @@ export default function Home(){
         <div className="datasetBadge">{selectedBacktest.dataset?.mode||'legacy'} · {(selectedBacktest.dataset?.backtest_from||selectedBacktest.dataset?.from||'?')} → {(selectedBacktest.dataset?.backtest_to||selectedBacktest.dataset?.to||'?')} · {selectedBacktest.dataset?.fingerprint||'no fingerprint'}</div>
         {selectedBacktest.metrics?.benchmark_cagr!=null&&<div className="metricRow topGap"><span>Benchmark EW CAGR <b>{pct(selectedBacktest.metrics.benchmark_cagr)}</b></span><span>Benchmark Sharpe <b>{selectedBacktest.metrics.benchmark_sharpe}</b></span><span>Benchmark DD <b>{pct(selectedBacktest.metrics.benchmark_max_drawdown)}</b></span><span>Excess CAGR <b className={(selectedBacktest.metrics.excess_cagr_vs_equal_weight||0)>=0?'positive':'negative'}>{pct(selectedBacktest.metrics.excess_cagr_vs_equal_weight)}</b></span></div>}
         <p className="muted mini">{selectedBacktest.audit_note||'Signal au close T, exécution au prochain open.'}</p>
+        {selectedBacktest.meta_v5&&<div className="resultNotice">
+          <b>META V5 OOS</b>
+          <div className="metricRow topGap">
+            <span>OOS Rank IC <b>{num(selectedBacktest.meta_v5.oos_mean_rank_ic,4)}</b></span>
+            <span>IC positif <b>{pct(selectedBacktest.meta_v5.positive_oos_ic_ratio)}</b></span>
+            <span>Signals acceptés <b>{pct(selectedBacktest.meta_v5.overall_acceptance_rate)}</b></span>
+            <span>Folds <b>{selectedBacktest.meta_v5.folds?.length||0}</b></span>
+          </div>
+          <p className="muted mini">Ridge + HGB + LightGBM ensemble + Momentum → router de régime → EWMA → meta-labeler calibré → sizing probabiliste.</p>
+        </div>}
         <div className="chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={selectedBacktest.equity_curve||[]}><XAxis dataKey="date" minTickGap={45}/><YAxis domain={['auto','auto']}/><Tooltip/><Line dataKey="equity" dot={false}/></LineChart></ResponsiveContainer></div>
         <h4>Ordres simulés ({selectedBacktest.order_ledger?.length||0})</h4>
         {!selectedBacktest.order_ledger?.length?<Empty>Ancien backtest : relance un V2/V3 pour obtenir le journal détaillé.</Empty>:<div className="tableScroll"><table><thead><tr><th>Date</th><th>Symbole</th><th>Action</th><th>Prix</th><th>Qté</th><th>Notionnel</th><th>Coût</th></tr></thead><tbody>{selectedBacktest.order_ledger.slice(-250).reverse().map((o,i)=><tr key={o.rebalance_id+'-'+o.symbol+'-'+i}><td>{o.date}</td><td><b>{o.symbol}</b></td><td className={o.action==='BUY'||o.action==='COVER'?'positive':'negative'}>{o.action}</td><td>{'$'+num(o.price,2)}</td><td>{num(o.qty,3)}</td><td>{'$'+Number(o.notional_usd||0).toLocaleString()}</td><td>{'$'+num(o.estimated_cost_usd,2)}</td></tr>)}</tbody></table></div>}
@@ -226,8 +236,8 @@ export default function Home(){
         </>}
       </Card>
       <div className="two section">
-        <Card title="Adaptive META V3">{validation?.adaptive_backtest?<><div>Sharpe <b>{validation.adaptive_backtest.sharpe}</b></div><div>CAGR <b>{pct(validation.adaptive_backtest.cagr)}</b></div><div>DD <b>{pct(validation.adaptive_backtest.max_drawdown)}</b></div><div>IC <b>{num(validation.adaptive_backtest.mean_rank_ic_20d,4)}</b></div></>:<Empty>—</Empty>}</Card>
-        <Card title="Benchmarks">{validation?.baseline_backtest?<><div>Momentum Sharpe <b>{validation.baseline_backtest.sharpe}</b></div><div>META V2 Sharpe <b>{validation.fixed_meta_backtest?.sharpe??'—'}</b></div><div>Momentum IC <b>{num(validation.baseline_backtest.mean_rank_ic_20d,4)}</b></div></>:<Empty>—</Empty>}</Card>
+        <Card title="META Ensemble V5">{validation?.meta_v5_backtest?<><div>Sharpe <b>{validation.meta_v5_backtest.sharpe}</b></div><div>CAGR <b>{pct(validation.meta_v5_backtest.cagr)}</b></div><div>DD <b>{pct(validation.meta_v5_backtest.max_drawdown)}</b></div><div>OOS IC <b>{num(validation.meta_v5_research?.oos_mean_rank_ic,4)}</b></div><div>Turnover <b>{pct(validation.meta_v5_backtest.avg_turnover_per_rebalance)}</b></div><div>Excess CAGR <b>{pct(validation.meta_v5_backtest.excess_cagr_vs_equal_weight)}</b></div></>:<Empty>—</Empty>}</Card>
+        <Card title="Benchmarks">{validation?.baseline_backtest?<><div>Momentum Sharpe <b>{validation.baseline_backtest.sharpe}</b></div><div>V4 Sharpe <b>{validation.v4_backtest?.sharpe??'—'}</b></div><div>Equal-weight CAGR <b>{pct(validation.meta_v5_backtest?.benchmark_cagr)}</b></div><div>Robust median Sharpe <b>{validation.meta_v5_robustness?.median_sharpe??'—'}</b></div></>:<Empty>—</Empty>}</Card>
       </div>
     </>}
 
