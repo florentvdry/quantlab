@@ -5,7 +5,7 @@ import pandas as pd
 from app.services.features import build_feature_panel, panel_metadata, FEATURES
 
 DEFAULTS={
-    "long_count":20,"short_count":20,"rebalance_days":5,
+    "long_count":20,"short_count":20,"rebalance_days":5,"warmup_days":0,
     "commission_bps":6.0,"slippage_bps":5.0,"gross_exposure":2.0,
     "initial_capital":100000.0,"adaptive_lookback_days":252,
     "long_gross":None,"short_gross":None,"rank_buffer":0,
@@ -155,8 +155,9 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
     p=DEFAULTS|(params or {})
     df=(build_feature_panel() if panel is None else panel).copy().sort_values(["date","symbol"])
     all_dates=np.array(sorted(df.date.unique()))
-    if len(all_dates)<280: raise ValueError("Not enough history for warm-up and out-of-sample backtest")
-    signal_dates=list(all_dates[260::int(p["rebalance_days"])])
+    warmup=max(0,int(p.get("warmup_days",0)))
+    if len(all_dates)<max(30,warmup+20): raise ValueError("Not enough history for backtest")
+    signal_dates=list(all_dates[warmup::int(p["rebalance_days"])])
     equity=1.0;curve=[];turnovers=[];prev_weights={};prev_qty={}
     benchmark_equity=1.0;benchmark_curve=[]
     positions=[];orders=[];rebalances=[];gross_pnl=[];costs=[]
