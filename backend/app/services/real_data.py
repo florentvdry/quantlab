@@ -160,7 +160,11 @@ def _sec_operating_quality(symbols):
         net_income=float(latest.get("net_income",np.nan))
         operating_cf=float(latest.get("operating_cf",np.nan))
 
-        balance_ok=np.isfinite(assets) and assets>0 and np.isfinite(equity) and equity>0
+        balance_ok=(
+            np.isfinite(assets) and assets>0
+            and np.isfinite(equity)
+            and equity>(-0.50*assets)
+        )
         activity_ok=(np.isfinite(revenue) and revenue>0) or np.isfinite(net_income)
         earning_power=(np.isfinite(net_income) and net_income>0) or (np.isfinite(operating_cf) and operating_cf>0)
         size_ok=(
@@ -239,7 +243,7 @@ def _quality_rank_universe(candidates):
             "min_median_dollar_volume_60":float(settings.real_universe_min_median_dollar_volume),
             "max_volatility_60":float(settings.real_universe_max_volatility),
             "min_sec_core_metrics":int(settings.real_universe_min_sec_core_metrics),
-            "requires_positive_equity":True,
+            "requires_equity_above_minus_50pct_assets":True,
             "min_revenue_or_assets":[float(settings.real_universe_min_revenue),float(settings.real_universe_min_assets)],
             "profitability_is_ranking_signal_not_hard_gate":True,
         },
