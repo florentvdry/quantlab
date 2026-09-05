@@ -1,0 +1,96 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: quantlab
+      POSTGRES_USER: quantlab
+      POSTGRES_PASSWORD: quantlab
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quantlab -d quantlab"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://quantlab:quantlab@db:5432/quantlab
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - quantdata:/data
+
+  worker:
+    build: ./backend
+    command: ["python", "-m", "app.worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://quantlab:quantlab@db:5432/quantlab
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - quantdata:/data
+
+  scheduler:
+    build: ./backend
+    command: ["python", "-m", "app.scheduler"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://quantlab:quantlab@db:5432/quantlab
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - api
+    volumes:
+      - ./backend:/app
+      - quantdata:/data
+
+  trade_stream:
+    build: ./backend
+    command: ["python", "-m", "app.trade_stream"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://quantlab:quantlab@db:5432/quantlab
+    depends_on:
+      - api
+    volumes:
+      - ./backend:/app
+
+  web:
+    build: ./frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      INTERNAL_API_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  pgdata:
+  quantdata:
