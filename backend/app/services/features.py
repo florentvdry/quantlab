@@ -43,12 +43,19 @@ def clear_feature_cache(remove_disk=False):
             try:os.remove(path)
             except FileNotFoundError:pass
 
-def _disk_valid():
+def _store_matches_mode():
     if not os.path.exists(STORE_PATH) or not os.path.exists(META_PATH):return False
     try:
-        meta=json.load(open(META_PATH,encoding="utf-8"))
-        return meta.get("mode")==settings.data_mode.lower() and meta.get("schema")==FEATURE_SCHEMA_VERSION and time.time()-os.path.getmtime(STORE_PATH)<12*3600
+        with open(META_PATH,encoding="utf-8") as f:meta=json.load(f)
+        return meta.get("mode")==settings.data_mode.lower() and meta.get("schema")==FEATURE_SCHEMA_VERSION
     except Exception:return False
+
+def _disk_valid():
+    return _store_matches_mode() and time.time()-os.path.getmtime(STORE_PATH)<12*3600
+
+def _read_store():
+    global _PANEL_CACHE,_PANEL_CACHE_AT
+    df=pd.read_parquet(STORE_PATH);_PANEL_CACHE=df;_PANEL_CACHE_AT=time.time();return df.copy()
 
 def _write_store(df):
     df.to_parquet(STORE_PATH,index=False)
@@ -58,8 +65,14 @@ def _write_store(df):
 def build_feature_panel(force=False):
     global _PANEL_CACHE,_PANEL_CACHE_AT
     if not force and _PANEL_CACHE is not None and time.time()-_PANEL_CACHE_AT<60:return _PANEL_CACHE.copy()
-    if not force and _disk_valid():
-        df=pd.read_parquet(STORE_PATH);_PANEL_CACHE=df;_PANEL_CACHE_AT=time.time();return df.copy()
+
+    # Dashboard/API reads must never trigger the expensive Alpaca + SEC rebuild.
+    # Use the persisted store even when it is older than 12h; freshness is reported
+    # separately by the data-quality/risk gates. Only the Daily Pipeline uses force=True.
+    if not force and _store_matches_mode():return _read_store()
+    if not force and settings.data_mode.lower()=="alpaca":
+        raise RuntimeError("Feature Store not initialized for Alpaca mode. Run the Daily Pipeline first.")
+
     df=_technical(_source_panel());rank_cols=["momentum_12_1","ret_60d","ret_20d","trend_50","trend_200","fundamental_raw","earnings_raw","news_raw"]
     for c in rank_cols:df[c+"_rank"]=df.groupby("date")[c].transform(_rank)
     df["low_vol_rank"]=1-df.groupby("date")["vol_20d"].transform(_rank);df["liquidity_rank"]=df.groupby("date")["dollar_volume"].transform(_rank)
