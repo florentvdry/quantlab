@@ -99,7 +99,7 @@ function BacktestDetail({detail,registry,fetchBacktest}){
 export function BacktestsView({snapshot,detail,onSelect,onRunCandidate,running,fetchBacktest}){
   const rows=safeArray(snapshot?.backtests)
   return <div className="space-y-6">
-    <SectionHeading title="Backtests" description="V7 reste le contrôle risk-aware. V7.1 conserve exactement le même alpha et la même diversification, mais réalloue mieux le capital quand la confiance est suffisante." action={<Button kind="primary" icon={RefreshCcw} disabled={running} onClick={onRunCandidate}>{running?'V7.1 en cours…':'Tester META V7.1'}</Button>}/>
+    <SectionHeading title="Backtests" description="V7.1 a échoué sur le grand univers. Le challenger courant revient à V7, mais sur Universe V3 : uniquement sociétés opérationnelles établies, SEC-backed, liquides et historiquement éligibles." action={<Button kind="primary" icon={RefreshCcw} disabled={running} onClick={onRunCandidate}>{running?'V7 Solid en cours…':'Tester META V7 · Solid V3'}</Button>}/>
     <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
       <Panel className="h-fit overflow-hidden">
         <PanelHeader title="Registry" eyebrow={rows.length+' runs'}/>
