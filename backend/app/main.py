@@ -17,12 +17,18 @@ from app.services.features import build_feature_panel,panel_metadata,feature_sto
 from app.services.execution import ExecutionService
 from app.services.jobs import enqueue
 from app.services.monitoring import snapshot_paper,paper_history,compare_paper_backtest,promotion_gate
+from app.services.app_snapshot import build_app_snapshot
+from app.services.external_http import ExternalServiceError
 
-app=FastAPI(title="Quant Lab V1",version="1.1.0")
+app=FastAPI(title="Quant Lab",version="1.3.0")
 app.add_middleware(CORSMiddleware,allow_origins=["http://localhost:3000","http://127.0.0.1:3000"],allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
 
 @app.on_event("startup")
 def startup(): Base.metadata.create_all(bind=engine)
+
+@app.exception_handler(ExternalServiceError)
+async def external_service_error_handler(_:Request,exc:ExternalServiceError):
+    return JSONResponse(status_code=502,content={"detail":{"code":"EXTERNAL_SERVICE_ERROR","service":exc.service,"message":str(exc)}})
 
 @app.exception_handler(RuntimeError)
 async def runtime_error_handler(_:Request,exc:RuntimeError):
@@ -39,7 +45,7 @@ class ExperimentRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status":"ok","version":"1.1.0"}
+    return {"status":"ok","version":"1.3.0"}
 
 @app.get("/ready")
 def ready(db:Session=Depends(get_db)):
@@ -49,6 +55,9 @@ def ready(db:Session=Depends(get_db)):
     try: checks["redis"]=bool(Redis.from_url(settings.redis_url).ping())
     except Exception as e: checks["redis"]=str(e)
     return JSONResponse(status_code=200 if all(v is True for v in checks.values()) else 503,content={"ready":all(v is True for v in checks.values()),"checks":checks})
+
+@app.get("/api/app/snapshot")
+def app_snapshot(db:Session=Depends(get_db)):return build_app_snapshot(db)
 
 @app.get("/api/feature-store/status")
 def feature_status():return feature_store_status()
@@ -69,14 +78,14 @@ def system_status():
 @app.get("/api/setup")
 def setup(db:Session=Depends(get_db)):
     from app.services.dataset_state import states
-    s=states(db);alpaca=bool(settings.alpaca_api_key and settings.alpaca_secret_key);fs=feature_store_status()
+    s=states(db);alpaca=bool(settings.alpaca_api_key and settings.alpaca_secret_key);fs=feature_store_status();runtime=system_status()
     dq_state=s.get("data_quality",{})
     steps=[
         {"name":"Market Data","ok":settings.data_mode=="synthetic" or alpaca,"detail":settings.data_mode},
         {"name":"Historical Dataset","ok":"market_data" in s or settings.data_mode=="synthetic","detail":s.get("market_data")},
         {"name":"Feature Store","ok":fs["ready"],"detail":fs},
         {"name":"Data Quality","ok":fs["ready"] and dq_state.get("status")=="PASS","detail":dq_state if fs["ready"] else {"status":"NOT_READY","message":fs["message"]}},
-        {"name":"Worker","ok":system_status().get("worker_online",False),"detail":{"queue_depth":system_status().get("queue_depth")}},
+        {"name":"Worker","ok":runtime.get("worker_online",False),"detail":{"queue_depth":runtime.get("queue_depth")}},
         {"name":"Autopilot","ok":settings.auto_bootstrap_enabled,"detail":"automatic data → research → validation → signals"},
         {"name":"Strategy","ok":db.query(StrategyVersion).count()>0,"detail":db.query(StrategyVersion).count()},
         {"name":"Paper Trading","ok":bool(db.query(StrategyVersion).filter(StrategyVersion.status=="PAPER").first()),"detail":"locked unless validated"},
@@ -85,7 +94,7 @@ def setup(db:Session=Depends(get_db)):
 
 @app.get("/api/dashboard")
 def dashboard(db:Session=Depends(get_db)):
-    broker=PaperBrokerService(db).sync_account();last=db.query(BacktestRun).order_by(BacktestRun.id.desc()).first()
+    broker=PaperBrokerService(db).cached_account();last=db.query(BacktestRun).order_by(BacktestRun.id.desc()).first()
     return {"broker":broker,"last_backtest":None if not last else _bt_summary(last),"paper_positions":db.query(PaperPosition).count(),"mode":"PAPER"}
 
 def _bt_summary(r):
