@@ -12,6 +12,7 @@ function BacktestDetail({detail}){
   const positions=safeArray(detail.position_ledger)
   const orders=safeArray(detail.order_ledger)
   const rebalances=safeArray(detail.rebalance_ledger)
+  const simulation=detail.meta_v5?.simulation
   const stats=[
     ['CAGR',pct(metrics.cagr)],
     ['Sharpe',num(metrics.sharpe,2)],
@@ -31,6 +32,17 @@ function BacktestDetail({detail}){
       <div className="border-t border-white/6 px-5 py-3 text-xs text-slate-600">
         {detail.dataset?.mode||'—'} · {detail.dataset?.backtest_from||detail.dataset?.from||'?'} → {detail.dataset?.backtest_to||detail.dataset?.to||'?'} · {detail.execution_timing||'timing n/a'}
       </div>
+      {simulation&&<div className="border-t border-indigo-300/10 bg-indigo-400/[0.035] px-5 py-4">
+        <div className="text-[10px] font-semibold uppercase tracking-[.15em] text-indigo-300">Continuous walk-forward</div>
+        <div className="mt-3 grid gap-3 text-xs sm:grid-cols-2 xl:grid-cols-5">
+          <div><div className="text-slate-600">Features valides</div><div className="mt-1 text-slate-300">{simulation.feature_valid_from}</div></div>
+          <div><div className="text-slate-600">Premier score live-like</div><div className="mt-1 text-slate-300">{simulation.first_live_like_score}</div></div>
+          <div><div className="text-slate-600">Dernier score</div><div className="mt-1 text-slate-300">{simulation.last_live_like_score}</div></div>
+          <div><div className="text-slate-600">Couverture simulée</div><div className="mt-1 text-slate-300">{pct(simulation.coverage_ratio)}</div></div>
+          <div><div className="text-slate-600">Refresh / Rebalance</div><div className="mt-1 text-slate-300">{simulation.model_refresh_days}j / {simulation.rebalance_days}j</div></div>
+        </div>
+        <div className="mt-3 text-[11px] leading-5 text-slate-500">Pas de holdout fixe : après le démarrage minimal, chaque date est simulée chronologiquement avec uniquement les données alors connues.</div>
+      </div>}
       <div className="h-72 p-5">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={safeArray(detail.equity_curve)}>
