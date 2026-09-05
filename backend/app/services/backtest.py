@@ -488,6 +488,28 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
             "equity_usd":round(equity_after_usd,2),"return":net_ret,
             "gross_return":gross_ret,"cost":cost_ret
         })
+        # Record the realized exit mark for every completed holding period.
+        # If the next period opens on the same date, its entry journal row will
+        # overwrite this one during date de-duplication; if the next signal is
+        # skipped, this row correctly becomes the transition to cash.
+        account_curve.append({
+            **period_context,
+            "date":str(pd.Timestamp(exit_d).date()),
+            "equity_usd":round(float(equity_after_usd),2),
+            "balance_usd":round(float(equity_after_usd),2),
+            "floating_pnl_usd":0.0,
+            "rebalance_id":rebalance_id,
+            "turnover":0.0,
+            "cost_usd":0.0,
+            "trade_count":0,
+            "gross_exposure":0.0,
+            "net_exposure":0.0,
+            "cash_pct":1.0,
+            "position_count":0,
+            "largest_weight":0.0,
+            "active_symbols":[],
+        })
+
         rebalances.append({
             "rebalance_id":rebalance_id,
             "signal_date":str(pd.Timestamp(signal_d).date()),
