@@ -134,8 +134,20 @@ function BacktestDetail({detail,registry,fetchBacktest}){
 
 export function BacktestsView({snapshot,detail,onSelect,onRunCandidate,running,fetchBacktest}){
   const rows=safeArray(snapshot?.backtests)
+  const candidateJob=safeArray(snapshot?.jobs).find(job=>job.kind==='META_V7')
   return <div className="space-y-6">
     <SectionHeading title="Backtests" description="V7.1 a échoué sur le grand univers. Le challenger courant revient à V7, mais sur Universe V4 : uniquement sociétés opérationnelles établies, SEC-backed, liquides et historiquement éligibles." action={<Button kind="primary" icon={RefreshCcw} disabled={running} onClick={onRunCandidate}>{running?'V7 Solid en cours…':'Tester META V7 · Solid V4'}</Button>}/>
+    {candidateJob&&<Panel className="p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <Badge tone={candidateJob.status==='FAILED'?'bad':candidateJob.status==='COMPLETED'?'good':'info'}>{candidateJob.status}</Badge>
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-medium text-slate-300">{candidateJob.message||'META V7'}</div>
+          <div className="mt-1 text-[11px] text-slate-600">progression {candidateJob.progress||0}%{candidateJob.backtest_id?' · backtest #'+candidateJob.backtest_id:''}</div>
+        </div>
+        {candidateJob.backtest_id&&<button onClick={()=>onSelect(candidateJob.backtest_id)} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-medium text-slate-200 hover:bg-white/10">Ouvrir le backtest</button>}
+      </div>
+      {candidateJob.error&&<div className="mt-3 rounded-lg border border-rose-400/15 bg-rose-500/[0.05] px-3 py-2 text-[11px] leading-5 text-rose-200">{candidateJob.error}</div>}
+    </Panel>}
     <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
       <Panel className="h-fit overflow-hidden">
         <PanelHeader title="Registry" eyebrow={rows.length+' runs'}/>
