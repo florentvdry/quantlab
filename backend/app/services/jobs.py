@@ -223,9 +223,27 @@ def execute_job(key:str):
                     })
                 )
 
+            def persist_partial_v7_scenarios(scenarios):
+                result["meta_v7_validation"]={
+                    "robustness":{"status":"RUNNING","scenario_count":len(scenarios)},
+                    "scenarios":scenarios,
+                }
+                _update_persisted_backtest(db,backtest_id,result)
+                update(
+                    db,row,
+                    result_json=safe_dumps({
+                        "message":f"META V7 — stress tests {len(scenarios)} scénarios persistés",
+                        "backtest_id":backtest_id,
+                        "model_version_id":model_version_id,
+                    }),
+                )
+
             # V6 OOS is fingerprint-cached by run_meta_v7 above, so this phase reuses
             # the same predictions and only computes the portfolio/risk stresses.
-            bundle=meta_v7_validation_bundle(progress=progress_v7_stress)
+            bundle=meta_v7_validation_bundle(
+                progress=progress_v7_stress,
+                scenario_callback=persist_partial_v7_scenarios,
+            )
             result["meta_v7_validation"]={
                 "robustness":bundle["robustness"],
                 "scenarios":bundle["scenarios"],
