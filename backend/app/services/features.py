@@ -5,7 +5,7 @@ import pandas as pd
 from app.core.config import settings
 from app.services.data import synthetic_panel
 
-FEATURE_SCHEMA_VERSION="6"
+FEATURE_SCHEMA_VERSION="7"
 FEATURES=["momentum_12_1_rank","ret_60d_rank","ret_20d_rank","trend_50_rank","trend_200_rank","fundamental_raw_rank","earnings_raw_rank","news_raw_rank","low_vol_rank","liquidity_rank"]
 STORE_DIR=os.getenv("QUANTLAB_DATA_DIR","/data");STORE_PATH=f"{STORE_DIR}/feature_store.parquet";META_PATH=f"{STORE_DIR}/feature_store.json"
 _PANEL_CACHE=None;_PANEL_CACHE_AT=0.0
@@ -28,8 +28,8 @@ def _technical(df):
         base_elig
         &df["close"].ge(float(settings.real_universe_min_price))
         &df["history_sessions_to_date"].ge(int(settings.real_trade_min_history_sessions))
-        &df["median_dollar_volume_60"].ge(float(settings.real_universe_min_median_dollar_volume))
-        &df["vol_60d"].le(float(settings.real_universe_max_volatility))
+        &df["median_dollar_volume_60"].ge(float(settings.real_trade_min_median_dollar_volume))
+        &df["vol_60d"].le(float(settings.real_trade_max_volatility))
     ).fillna(False)
     return df
 
@@ -116,11 +116,17 @@ def build_feature_panel(force=False):
 
 def panel_metadata(df=None):
     df=build_feature_panel() if df is None else df
+    eligible_counts=None
+    if "solid_eligible" in df.columns:
+        eligible_counts=df[df["solid_eligible"].fillna(False)].groupby("date")["symbol"].nunique()
     payload={"mode":settings.data_mode.lower(),"feed":settings.alpaca_feed if settings.data_mode.lower()=="alpaca" else "synthetic","schema":FEATURE_SCHEMA_VERSION,
              "rows":int(len(df)),"symbols":int(df.symbol.nunique()),"from":str(pd.Timestamp(df.date.min()).date()),"to":str(pd.Timestamp(df.date.max()).date()),
              "historical_news":"neutral_no_point_in_time_history",
              "solid_eligible_rows":int(df["solid_eligible"].sum()) if "solid_eligible" in df.columns else None,
-             "solid_eligible_symbols_latest":int(df[df["date"].eq(df["date"].max())&df.get("solid_eligible",False)]["symbol"].nunique()) if "solid_eligible" in df.columns else None}
+             "solid_eligible_symbols_latest":int(eligible_counts.iloc[-1]) if eligible_counts is not None and len(eligible_counts) else None,
+             "solid_eligible_symbols_median":round(float(eligible_counts.median()),2) if eligible_counts is not None and len(eligible_counts) else None,
+             "solid_eligible_symbols_p10":round(float(eligible_counts.quantile(.10)),2) if eligible_counts is not None and len(eligible_counts) else None,
+             "solid_eligible_from":str(pd.Timestamp(eligible_counts.index.min()).date()) if eligible_counts is not None and len(eligible_counts) else None}
     if settings.data_mode.lower()=="alpaca":
         from app.services.real_data import market_data_metadata
         market=market_data_metadata()
