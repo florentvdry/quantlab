@@ -24,7 +24,7 @@ def factor_summary(panel=None):
     rows=[]
     for f in FEATURES:
         try:
-            r=factor_report(f,df); rows.append({k:r[k] for k in ["feature","mean_rank_ic","ic_ir","positive_ic_ratio","top_bottom_future_20d"]})
+            rr=factor_report(f,df);rows.append({k:rr[k] for k in ["feature","mean_rank_ic","ic_ir","positive_ic_ratio","top_bottom_future_20d"]})
         except Exception:
             rows.append({"feature":f,"mean_rank_ic":None,"ic_ir":None,"positive_ic_ratio":None,"top_bottom_future_20d":None})
     return {"dataset":panel_metadata(df),"factors":rows}
@@ -32,38 +32,72 @@ def factor_summary(panel=None):
 def correlations(panel=None):
     df=build_feature_panel() if panel is None else panel
     latest=df[df.date==df.date.max()]
-    c=latest[FEATURES].corr().round(3)
-    return {"features":FEATURES,"matrix":c.values.tolist()}
+    cc=latest[FEATURES].corr().round(3)
+    return {"features":FEATURES,"matrix":cc.values.tolist()}
 
 def _make_model(model):
     if model=="ridge": return Ridge(alpha=10)
     if model=="hgb": return HistGradientBoostingRegressor(max_iter=150,max_depth=4,learning_rate=.05,l2_regularization=1)
     raise ValueError("model must be ridge or hgb")
 
-def train_walk_forward(model="ridge", panel=None, min_train_days=504, test_days=126):
-    df=(build_feature_panel() if panel is None else panel).dropna(subset=FEATURES+["future_relative_20d"]).copy()
+def _walk_forward_scored(model="ridge",panel=None,min_train_days=504,test_days=126,embargo_days=20):
+    source=build_feature_panel() if panel is None else panel
+    df=source.dropna(subset=FEATURES+["future_relative_20d"]).copy()
     dates=np.array(sorted(df.date.unique()))
     if len(dates)<min_train_days+test_days:
-        min_train_days=max(252,int(len(dates)*.55)); test_days=max(63,int(len(dates)*.15))
-    folds=[]; all_pred=[]; start=min_train_days
+        min_train_days=max(252,int(len(dates)*.55));test_days=max(63,int(len(dates)*.15))
+    folds=[];all_pred=[];start=min_train_days
     while start<len(dates):
-        stop=min(start+test_days,len(dates)); train_dates=dates[:start]; test_dates=dates[start:stop]
-        if len(test_dates)<20: break
-        tr=df[df.date.isin(train_dates)]; te=df[df.date.isin(test_dates)].copy()
-        m=_make_model(model); m.fit(tr[FEATURES].fillna(.5),tr.future_relative_20d)
-        te["pred"]=m.predict(te[FEATURES].fillna(.5))
-        daily=te.groupby("date").apply(lambda x:x.pred.corr(x.future_relative_20d,method="spearman"),include_groups=False).dropna()
-        folds.append({"train_from":str(pd.Timestamp(train_dates[0]).date()),"train_to":str(pd.Timestamp(train_dates[-1]).date()),
-                      "test_from":str(pd.Timestamp(test_dates[0]).date()),"test_to":str(pd.Timestamp(test_dates[-1]).date()),
-                      "mean_rank_ic":float(daily.mean()),"ic_ir":float(daily.mean()/(daily.std()+1e-12)),"days":int(len(test_dates))})
-        all_pred.append(te[["date","symbol","future_relative_20d","pred"]]); start=stop
-    if not folds: raise ValueError("Not enough history for walk-forward")
+        stop=min(start+test_days,len(dates))
+        train_stop=start-int(embargo_days)
+        if train_stop<126:break
+        train_dates=dates[:train_stop];test_dates=dates[start:stop]
+        if len(test_dates)<20:break
+        tr=df[df.date.isin(train_dates)]
+        te=df[df.date.isin(test_dates)].copy()
+        if tr.empty or te.empty:break
+        m=_make_model(model);m.fit(tr[FEATURES].fillna(.5),tr.future_relative_20d)
+        te["model_score"]=m.predict(te[FEATURES].fillna(.5))
+        daily=te.groupby("date").apply(lambda x:x.model_score.corr(x.future_relative_20d,method="spearman"),include_groups=False).dropna()
+        folds.append({
+            "train_from":str(pd.Timestamp(train_dates[0]).date()),"train_to":str(pd.Timestamp(train_dates[-1]).date()),
+            "embargo_days":int(embargo_days),
+            "test_from":str(pd.Timestamp(test_dates[0]).date()),"test_to":str(pd.Timestamp(test_dates[-1]).date()),
+            "mean_rank_ic":float(daily.mean()),"ic_ir":float(daily.mean()/(daily.std()+1e-12)),"days":int(len(test_dates))
+        })
+        all_pred.append(te[["date","symbol","future_relative_20d","model_score"]]);start=stop
+    if not folds:raise ValueError("Not enough history for walk-forward")
     oos=pd.concat(all_pred,ignore_index=True)
-    daily=oos.groupby("date").apply(lambda x:x.pred.corr(x.future_relative_20d,method="spearman"),include_groups=False).dropna()
-    final=_make_model(model); final.fit(df[FEATURES].fillna(.5),df.future_relative_20d)
-    latest=df[df.date==df.date.max()].copy(); latest["prediction"]=final.predict(latest[FEATURES].fillna(.5)); latest=latest.sort_values("prediction",ascending=False)
+    daily=oos.groupby("date").apply(lambda x:x.model_score.corr(x.future_relative_20d,method="spearman"),include_groups=False).dropna()
+    summary={
+        "model":model,"dataset":panel_metadata(df),"folds":folds,
+        "embargo_days":int(embargo_days),
+        "oos_mean_rank_ic":float(daily.mean()),
+        "oos_ic_ir":float(daily.mean()/(daily.std()+1e-12)),
+        "positive_oos_ic_ratio":float((daily>0).mean())
+    }
+    scored=source.merge(oos[["date","symbol","model_score"]],on=["date","symbol"],how="left")
+    return scored,summary
+
+def train_walk_forward(model="ridge",panel=None,min_train_days=504,test_days=126):
+    source=build_feature_panel() if panel is None else panel
+    scored,summary=_walk_forward_scored(model,source,min_train_days,test_days,embargo_days=20)
+    df=source.dropna(subset=FEATURES+["future_relative_20d"]).copy()
+    final=_make_model(model);final.fit(df[FEATURES].fillna(.5),df.future_relative_20d)
+    latest=source.dropna(subset=FEATURES)
+    latest=latest[latest.date==latest.date.max()].copy()
+    latest["prediction"]=final.predict(latest[FEATURES].fillna(.5));latest=latest.sort_values("prediction",ascending=False)
     imp=[]
-    if model=="ridge": imp=[{"feature":f,"importance":float(v)} for f,v in sorted(zip(FEATURES,final.coef_),key=lambda z:abs(z[1]),reverse=True)]
-    return {"model":model,"dataset":panel_metadata(df),"folds":folds,"oos_mean_rank_ic":float(daily.mean()),
-            "oos_ic_ir":float(daily.mean()/(daily.std()+1e-12)),"positive_oos_ic_ratio":float((daily>0).mean()),
-            "feature_importance":imp,"latest_top":[{"symbol":r.symbol,"prediction":round(float(r.prediction),6)} for r in latest.head(20).itertuples()]}
+    if model=="ridge":
+        imp=[{"feature":f,"importance":float(v)} for f,v in sorted(zip(FEATURES,final.coef_),key=lambda z:abs(z[1]),reverse=True)]
+    return {**summary,"feature_importance":imp,
+            "latest_top":[{"symbol":x.symbol,"prediction":round(float(x.prediction),6)} for x in latest.head(20).itertuples()]}
+
+def run_model_oos_backtest(model="ridge",params=None,panel=None):
+    from app.services.backtest import run_backtest
+    source=build_feature_panel() if panel is None else panel
+    scored,summary=_walk_forward_scored(model,source,embargo_days=20)
+    result=run_backtest(params,score_column="model_score",strategy_name=f"{model.upper()} OOS v1",panel=scored)
+    result["model_walk_forward"]=summary
+    result["audit_note"]+=" Model score is strictly out-of-sample by temporal folds with a 20-trading-day target embargo."
+    return result
