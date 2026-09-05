@@ -274,10 +274,26 @@ def _heartbeat_loop():
             pass
         time.sleep(5)
 
+def _recover_interrupted_jobs():
+    db=SessionLocal()
+    try:
+        rows=db.query(JobRun).filter(JobRun.status=="RUNNING").all()
+        for row in rows:
+            row.status="FAILED"
+            row.error="Worker restarted while this job was running"
+            row.result_json=safe_dumps({"message":"Job interrompu par redémarrage du worker"})
+            row.completed_at=datetime.utcnow()
+            row.updated_at=datetime.utcnow()
+        if rows:db.commit()
+        return len(rows)
+    finally:
+        db.close()
+
 def worker_loop():
     r=redis_client()
+    recovered=_recover_interrupted_jobs()
     threading.Thread(target=_heartbeat_loop,daemon=True,name="quantlab-heartbeat").start()
-    print("QuantLab worker ready",flush=True)
+    print(f"QuantLab worker ready · recovered={recovered}",flush=True)
     while True:
         item=r.blpop(QUEUE,timeout=5)
         if item:
