@@ -203,3 +203,31 @@ def test_probability_sizing_can_leave_cash():
                    score_column="score",strategy_name="sized",panel=panel,position_scale_column="scale")
     first=r["position_ledger"][0]
     assert first["weight"]<=.25+1e-6
+
+
+def test_sec_companyfacts_404_is_non_fatal_and_cached(monkeypatch,tmp_path):
+    import httpx
+    from app.services import sec_fundamentals as sec
+    monkeypatch.setattr(sec,"CACHE",tmp_path)
+    monkeypatch.setattr(sec,"ticker_map",lambda force=False:{"MISS":{"cik":"0001067839","title":"Missing XBRL"}})
+    calls={"n":0}
+    def missing(url,host_data=True):
+        calls["n"]+=1
+        req=httpx.Request("GET",url)
+        resp=httpx.Response(404,request=req)
+        raise httpx.HTTPStatusError("not found",request=req,response=resp)
+    monkeypatch.setattr(sec,"_get_json",missing)
+    sec._LAST_DIAGNOSTICS["not_found"].clear();sec._LAST_DIAGNOSTICS["errors"].clear()
+    assert sec.companyfacts("MISS") is None
+    assert calls["n"]==1
+    assert sec.companyfacts("MISS") is None
+    assert calls["n"]==1
+    assert "MISS" in sec.diagnostics()["not_found"]
+
+def test_feature_store_status_reports_missing_without_raising(monkeypatch,tmp_path):
+    from app.services import features
+    monkeypatch.setattr(features,"STORE_PATH",str(tmp_path/"feature_store.parquet"))
+    monkeypatch.setattr(features,"META_PATH",str(tmp_path/"feature_store.json"))
+    status=features.feature_store_status()
+    assert status["ready"] is False
+    assert status["reason"]=="missing"
