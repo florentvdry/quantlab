@@ -17,6 +17,11 @@ os.makedirs(DATA_DIR,exist_ok=True)
 DEFAULT_UNIVERSE="AAPL MSFT NVDA AMZN META GOOGL GOOG AVGO TSLA BRK.B JPM LLY V WMT XOM MA UNH ORCL COST HD PG JNJ ABBV BAC NFLX CRM KO CVX MRK AMD PEP TMO CSCO ACN MCD IBM GE ABT CAT QCOM INTU AMAT TXN ISRG NOW BKNG SPGI GS RTX HON AMGN LOW PFE DIS NKE SBUX UPS BA DE".split()
 EXCHANGES={"NASDAQ","NYSE","ARCA","AMEX"}
 EXCLUDE_NAME=(" ETF"," ETN"," FUND"," WARRANT"," RIGHTS"," UNIT")
+ETF_SPONSOR_NAME=(
+    "PROSHARES","DIREXION","ISHARES","SPDR ","VANGUARD ","GLOBAL X ",
+    "WISDOMTREE","VANECK ","ARK ETF","ULTRAPRO","ULTRASHORT",
+    "DAILY BULL","DAILY BEAR","2X SHARES","3X SHARES",
+)
 
 def headers():
     return {"APCA-API-KEY-ID":settings.alpaca_api_key,"APCA-API-SECRET-KEY":settings.alpaca_secret_key}
@@ -47,6 +52,8 @@ def _asset_candidates():
         if a.get("exchange") not in EXCHANGES or not a.get("tradable"):
             continue
         if any(x in name for x in EXCLUDE_NAME):
+            continue
+        if any(x in name for x in ETF_SPONSOR_NAME):
             continue
         if not a.get("fractionable"):
             continue
@@ -129,6 +136,47 @@ def _quality_history(symbols):
     return pd.DataFrame(stats)
 
 
+def _sec_operating_quality(symbols):
+    from app.services.sec_fundamentals import fundamental_events
+
+    rows=[]
+    core=("revenue","net_income","assets","equity","operating_cf")
+    for symbol in symbols:
+        try:
+            ev=fundamental_events(symbol)
+        except Exception:
+            continue
+        if ev.empty:
+            continue
+        latest={}
+        for metric,g in ev.groupby("metric"):
+            g=g.sort_values(["available_at","period_end"])
+            latest[metric]=float(g.iloc[-1]["value"])
+        coverage=sum(int(metric in latest and np.isfinite(latest[metric])) for metric in core)
+        assets=float(latest.get("assets",np.nan))
+        equity=float(latest.get("equity",np.nan))
+        revenue=float(latest.get("revenue",np.nan))
+        net_income=float(latest.get("net_income",np.nan))
+        operating_cf=float(latest.get("operating_cf",np.nan))
+
+        balance_ok=np.isfinite(assets) and assets>0 and np.isfinite(equity) and equity>0
+        activity_ok=(np.isfinite(revenue) and revenue>0) or np.isfinite(net_income)
+        earning_power=(np.isfinite(net_income) and net_income>0) or (np.isfinite(operating_cf) and operating_cf>0)
+        eligible=(
+            coverage>=int(settings.real_universe_min_sec_core_metrics)
+            and balance_ok and activity_ok and earning_power
+        )
+        rows.append({
+            "symbol":symbol,
+            "sec_core_metrics":coverage,
+            "sec_balance_ok":bool(balance_ok),
+            "sec_activity_ok":bool(activity_ok),
+            "sec_earning_power":bool(earning_power),
+            "sec_operating_company":bool(eligible),
+        })
+    return pd.DataFrame(rows)
+
+
 def _quality_rank_universe(candidates):
     snapshot=_snapshot_rank(candidates)
     if not snapshot:return []
@@ -149,7 +197,15 @@ def _quality_rank_universe(candidates):
     ].copy()
 
     if qualified.empty:
-        return [x[0] for x in top[:settings.real_universe_size]]
+        return []
+
+    sec=_sec_operating_quality(qualified["symbol"].tolist())
+    if sec.empty:
+        return []
+    qualified=qualified.merge(sec,on="symbol",how="left")
+    qualified=qualified[qualified["sec_operating_company"].fillna(False)].copy()
+    if qualified.empty:
+        return []
 
     qualified["liq_rank"]=qualified["median_dollar_volume_60"].rank(pct=True)
     qualified["current_liq_rank"]=qualified["current_dollar_volume"].rank(pct=True)
@@ -176,6 +232,9 @@ def _quality_rank_universe(candidates):
             "min_history_sessions":int(settings.real_universe_min_history_sessions),
             "min_median_dollar_volume_60":float(settings.real_universe_min_median_dollar_volume),
             "max_volatility_60":float(settings.real_universe_max_volatility),
+            "min_sec_core_metrics":int(settings.real_universe_min_sec_core_metrics),
+            "requires_positive_equity":True,
+            "requires_positive_net_income_or_operating_cf":True,
         },
         "top":[
             {
@@ -184,6 +243,7 @@ def _quality_rank_universe(candidates):
                 "median_dollar_volume_60":round(float(row.median_dollar_volume_60),2),
                 "history_sessions":int(row.history_sessions),
                 "volatility_60":round(float(row.volatility_60),4),
+                "sec_core_metrics":int(row.sec_core_metrics),
             }
             for row in qualified.head(min(50,len(qualified))).itertuples()
         ],
@@ -210,7 +270,7 @@ def universe(force=False):
             syms=cached.get("symbols",[])
             if (
                 syms
-                and cached.get("mode")=="quality_liquid_v2"
+                and cached.get("mode")=="quality_operating_v3"
                 and int(cached.get("requested_size",0))==int(settings.real_universe_size)
             ):
                 return syms[:settings.real_universe_size]
@@ -229,7 +289,7 @@ def universe(force=False):
 
     tmp=path+".tmp"
     with open(tmp,"w",encoding="utf-8") as fh:
-        json.dump({"date":date.today().isoformat(),"mode":"quality_liquid_v2","requested_size":int(settings.real_universe_size),"symbols":syms},fh)
+        json.dump({"date":date.today().isoformat(),"mode":"quality_operating_v3","requested_size":int(settings.real_universe_size),"symbols":syms},fh)
     os.replace(tmp,path)
     return syms
 
