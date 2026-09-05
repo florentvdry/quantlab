@@ -64,7 +64,7 @@ def system_status():
     return {"data_mode":settings.data_mode,"alpaca_configured":bool(settings.alpaca_api_key and settings.alpaca_secret_key),
             "paper_orders_enabled":settings.allow_alpaca_paper_orders,"paper_auto_enabled":settings.paper_auto_enabled,
             "trading_env":settings.trading_env,"live_trading_supported":False,
-            "worker_online":worker_online,"queue_depth":queue_depth}
+            "worker_online":worker_online,"queue_depth":queue_depth,"auto_bootstrap_enabled":settings.auto_bootstrap_enabled}
 
 @app.get("/api/setup")
 def setup(db:Session=Depends(get_db)):
@@ -77,10 +77,11 @@ def setup(db:Session=Depends(get_db)):
         {"name":"Feature Store","ok":fs["ready"],"detail":fs},
         {"name":"Data Quality","ok":fs["ready"] and dq_state.get("status")=="PASS","detail":dq_state if fs["ready"] else {"status":"NOT_READY","message":fs["message"]}},
         {"name":"Worker","ok":system_status().get("worker_online",False),"detail":{"queue_depth":system_status().get("queue_depth")}},
+        {"name":"Autopilot","ok":settings.auto_bootstrap_enabled,"detail":"automatic data → research → validation → signals"},
         {"name":"Strategy","ok":db.query(StrategyVersion).count()>0,"detail":db.query(StrategyVersion).count()},
         {"name":"Paper Trading","ok":bool(db.query(StrategyVersion).filter(StrategyVersion.status=="PAPER").first()),"detail":"locked unless validated"},
     ]
-    return {"steps":steps,"research_unlocked":all(x["ok"] for x in steps[:5]),"paper_locked":not steps[-1]["ok"] or not settings.allow_alpaca_paper_orders,"feature_store":fs}
+    return {"steps":steps,"research_unlocked":all(x["ok"] for x in steps[:6]),"paper_locked":not steps[-1]["ok"] or not settings.allow_alpaca_paper_orders,"feature_store":fs}
 
 @app.get("/api/dashboard")
 def dashboard(db:Session=Depends(get_db)):
@@ -130,6 +131,12 @@ def factors_summary():
     from app.services.research import factor_summary
     return factor_summary()
 
+@app.get("/api/research/factors/latest")
+def factors_summary_latest(db:Session=Depends(get_db)):
+    row=db.query(SystemState).filter(SystemState.key=="research.factor_summary").first()
+    if not row:return {"status":"NOT_RUN","factors":[]}
+    return {"status":"COMPLETED",**json.loads(row.value_json or "{}")}
+
 @app.get("/api/research/factors/{feature}")
 def research_factor(feature:str):
     from app.services.research import factor_report
@@ -148,6 +155,8 @@ def data_quality():
 
 @app.get("/api/validation/latest")
 def validation_latest(db:Session=Depends(get_db)):
+    state=db.query(SystemState).filter(SystemState.key=="validation.latest").first()
+    if state:return json.loads(state.value_json or "{}")
     r=db.query(JobRun).filter(JobRun.kind=="VALIDATION",JobRun.status=="COMPLETED").order_by(JobRun.id.desc()).first()
     if not r:return {"status":"NOT_RUN","passed":False}
     return {"status":"COMPLETED",**json.loads(r.result_json or "{}")}
@@ -203,6 +212,8 @@ def promote(strategy_id:int,db:Session=Depends(get_db)):
     db.query(StrategyVersion).filter(StrategyVersion.status=="PAPER").update({StrategyVersion.status:"ARCHIVED"})
     row.status="PAPER";db.commit();return {"id":row.id,"status":row.status,"gate":g}
 
+@app.post("/api/jobs/bootstrap")
+def job_bootstrap(force_market:bool=True,refresh_sec:bool=False):return enqueue("AUTO_BOOTSTRAP",{"force_market":force_market,"refresh_sec":refresh_sec})
 @app.post("/api/jobs/backtest")
 def job_backtest(req:BacktestRequest):return enqueue("BACKTEST",req.model_dump())
 @app.post("/api/jobs/meta-v5")
