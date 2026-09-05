@@ -17,12 +17,14 @@ class PaperBrokerService:
         return c
     def alpaca_enabled(self): return bool(settings.alpaca_api_key and settings.alpaca_secret_key)
     def sync_account(self):
-        c=self._conn()
+        c=self._conn();extra={"trading_blocked":False,"account_blocked":False,"shorting_enabled":True,"status":"SIMULATED"}
         if self.alpaca_enabled():
             r=httpx.get(settings.alpaca_paper_base_url+"/v2/account",headers=self._headers(),timeout=10);r.raise_for_status();d=r.json()
             c.provider="alpaca";c.equity=float(d["equity"]);c.cash=float(d["cash"]);c.buying_power=float(d["buying_power"]);c.connected=True;c.updated_at=datetime.utcnow();self.db.commit()
+            extra={"trading_blocked":bool(d.get("trading_blocked")),"account_blocked":bool(d.get("account_blocked")),
+                   "shorting_enabled":bool(d.get("shorting_enabled",True)),"status":d.get("status")}
         return {"provider":c.provider,"environment":"PAPER","connected":c.connected,"equity":c.equity,"cash":c.cash,"buying_power":c.buying_power,
-                "alpaca_credentials_configured":self.alpaca_enabled(),"data_mode":settings.data_mode,"orders_enabled":settings.allow_alpaca_paper_orders}
+                "alpaca_credentials_configured":self.alpaca_enabled(),"data_mode":settings.data_mode,"orders_enabled":settings.allow_alpaca_paper_orders,**extra}
     def target_portfolio(self,n=20):
         df=build_feature_panel();snap=df[df.date==df.date.max()].sort_values("meta_score",ascending=False);longs=snap.head(n);shorts=snap.tail(n);w=1/n
         return ([{"symbol":r.symbol,"side":"LONG","weight":w,"score":float(r.meta_score),"price":float(r.close)} for r in longs.itertuples()]+
