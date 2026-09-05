@@ -73,7 +73,7 @@ export function SystemView({snapshot,onRefresh,refreshing}){
       <Panel>
         <PanelHeader title="Datasets" eyebrow="Versions & freshness"/>
         {!Object.keys(datasets).length?<Empty>Aucun dataset persisté.</Empty>:<div className="divide-y divide-white/5">
-          {Object.entries(datasets).map(([key,value])=><div key={key} className="grid grid-cols-[1fr_auto] gap-4 px-5 py-3 text-xs"><div><div className="font-medium text-slate-300">{key}</div><div className="mt-1 text-[10px] text-slate-600">{value.latest||shortDate(value.updated_at)}</div></div><div className="text-right text-slate-500">{value.rows!=null?String(value.rows)+' rows':value.covered!=null?String(value.covered)+' covered':value.status||'—'}</div></div>)}
+          {Object.entries(datasets).map(([key,value])=><div key={key} className="grid grid-cols-[1fr_auto] gap-4 px-5 py-3 text-xs"><div><div className="font-medium text-slate-300">{key}</div><div className="mt-1 text-[10px] text-slate-600">{value.latest||shortDate(value.updated_at)}{value.universe_mode?' · '+value.universe_mode:''}</div>{value.universe_selected!=null&&<div className="mt-1 text-[10px] text-slate-700">{value.universe_selected} sélectionnées / {value.universe_qualified??'—'} qualifiées</div>}</div><div className="text-right text-slate-500">{value.rows!=null?String(value.rows)+' rows':value.covered!=null?String(value.covered)+' covered':value.status||'—'}</div></div>)}
         </div>}
       </Panel>
       <Panel>
