@@ -86,10 +86,10 @@ function BacktestDetail({detail}){
   </div>
 }
 
-export function BacktestsView({snapshot,detail,onSelect,onRunV5,running}){
+export function BacktestsView({snapshot,detail,onSelect,onRunCandidate,running}){
   const rows=safeArray(snapshot?.backtests)
   return <div className="space-y-6">
-    <SectionHeading title="Backtests" description="Un registre lisible, un audit détaillé, un seul bouton pour relancer le candidat actuel." action={<Button kind="primary" icon={RefreshCcw} disabled={running} onClick={onRunV5}>{running?'V5 en cours…':'Relancer META V5'}</Button>}/>
+    <SectionHeading title="Backtests" description="V5 reste le benchmark. V6 est le challenger execution-aligned : on ne le retiendra que s'il améliore Sharpe/drawdown sans casser la robustesse." action={<Button kind="primary" icon={RefreshCcw} disabled={running} onClick={onRunCandidate}>{running?'V6 en cours…':'Tester META V6'}</Button>}/>
     <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
       <Panel className="h-fit overflow-hidden">
         <PanelHeader title="Registry" eyebrow={rows.length+' runs'}/>
