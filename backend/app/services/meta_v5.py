@@ -583,3 +583,92 @@ def meta_v5_validation_bundle(panel: pd.DataFrame | None = None, progress=None) 
         "turnover_base": next((r["avg_turnover_per_rebalance"] for r in rows if r["scenario"] == "base"), None),
     }
     return {"backtest": base, "research": research, "robustness": robust, "scenarios": rows}
+
+
+def latest_meta_v5_signals(panel: pd.DataFrame | None = None, progress=None) -> dict:
+    """Train only on labels knowable before the latest close and score recent dates.
+
+    The output is a research signal snapshot. It is deliberately separate from
+    Paper execution and does not unlock trading.
+    """
+    source = build_feature_panel() if panel is None else panel.copy()
+    source = _regime_frame(source)
+    dates = np.array(sorted(source["date"].unique()))
+    embargo = int(V5_CONFIG["embargo_days"])
+    validation_days = int(V5_CONFIG["validation_days"])
+    if len(dates) < 360:
+        raise ValueError("Not enough history for META V5 current signal")
+
+    latest_i = len(dates) - 1
+    safe_stop = latest_i - embargo + 1
+    val_start = safe_stop - validation_days
+    base_stop = val_start - embargo
+    if base_stop < 126:
+        raise ValueError("Not enough safe history for META V5 current signal")
+
+    labelled = source.dropna(subset=MODEL_FEATURES + ["future_relative_20d"]).copy()
+    base_dates = dates[:base_stop]
+    val_dates = dates[val_start:safe_stop]
+    safe_train_dates = dates[:safe_stop]
+    recent_dates = dates[max(0, latest_i - 30):latest_i + 1]
+
+    base_train = labelled[labelled["date"].isin(base_dates)]
+    validation = labelled[labelled["date"].isin(val_dates)]
+    safe_train = labelled[labelled["date"].isin(safe_train_dates)]
+    recent = source[source["date"].isin(recent_dates)].dropna(subset=MODEL_FEATURES).copy()
+
+    if progress:
+        progress(20, "META V5 signals: validation ensemble/router")
+    val_models = _fit_base(base_train)
+    val_pred = _predict_base(val_models, validation)
+    router, router_diag = _router_weights(val_pred)
+    val_pred = _blend(val_pred, router)
+    meta = _fit_meta_layer(val_pred)
+
+    if progress:
+        progress(55, "META V5 signals: refit safe history")
+    live_models = _fit_base(safe_train)
+    recent_pred = _predict_base(live_models, recent)
+    recent_pred = _blend(recent_pred, router)
+    recent_pred = _apply_meta(recent_pred, meta)
+    latest_date = recent_pred["date"].max()
+    latest = recent_pred[recent_pred["date"] == latest_date].copy()
+    latest = latest.sort_values("v5_trade_score", ascending=False, na_position="last")
+
+    rows = []
+    for rank, row in enumerate(latest.itertuples(), start=1):
+        accepted = bool(np.isfinite(getattr(row, "v5_trade_score")))
+        rows.append({
+            "rank": rank,
+            "symbol": row.symbol,
+            "regime": row.v5_regime,
+            "raw_score": round(float(row.v5_raw_score), 6),
+            "smooth_score": round(float(row.v5_smooth_score), 6),
+            "meta_probability": round(float(row.v5_meta_probability), 6),
+            "position_scale": round(float(row.v5_position_scale), 6),
+            "accepted": accepted,
+        })
+
+    accepted_rows = [r for r in rows if r["accepted"]]
+    return {
+        "status": "READY",
+        "strategy": "META Ensemble v5",
+        "market_date": str(pd.Timestamp(latest_date).date()),
+        "generated_at": pd.Timestamp.utcnow().isoformat(),
+        "dataset": panel_metadata(source),
+        "training": {
+            "base_train_to": str(pd.Timestamp(base_dates[-1]).date()),
+            "validation_from": str(pd.Timestamp(val_dates[0]).date()),
+            "validation_to": str(pd.Timestamp(val_dates[-1]).date()),
+            "safe_train_to": str(pd.Timestamp(safe_train_dates[-1]).date()),
+            "target_embargo_days": embargo,
+            "meta_threshold": meta.threshold,
+            "meta": meta.diagnostics,
+            "router_weights": router,
+            "router_diagnostics": router_diag,
+        },
+        "accepted_count": len(accepted_rows),
+        "signals": rows,
+        "accepted_signals": accepted_rows,
+        "paper_execution": "LOCKED_RESEARCH_SIGNAL_ONLY",
+    }
