@@ -424,3 +424,38 @@ def test_v7_market_risk_scale_is_one_sided():
         b.loc[b.index<=cutoff].to_numpy(),
         equal_nan=True,
     )
+
+
+def test_backtest_account_curve_tracks_daily_equity_and_realized_balance():
+    from app.services.backtest import run_backtest
+
+    dates=pd.bdate_range("2026-01-02",periods=70)
+    rows=[]
+    for si,symbol in enumerate(["A","B","C","D"]):
+        price=100.0+si
+        for i,d in enumerate(dates):
+            price*=1+(0.0015 if symbol=="A" else 0.0004)
+            rows.append({
+                "date":d,"symbol":symbol,"sector":"Test",
+                "open":price,"close":price,
+                "score":1.0-si*.2,
+                "future_relative_20d":0.0,
+            })
+    panel=pd.DataFrame(rows)
+    result=run_backtest(
+        {
+            "long_count":2,"short_count":0,"rebalance_days":10,
+            "gross_exposure":1.0,"long_gross":1.0,
+            "initial_capital":100000,
+        },
+        score_column="score",
+        strategy_name="account-curve",
+        panel=panel,
+    )
+
+    curve=result["account_curve"]
+    assert len(curve)>len(result["equity_curve"])
+    assert {"date","equity_usd","balance_usd","floating_pnl_usd"}<=set(curve[0])
+    assert any(abs(float(row["equity_usd"])-float(row["balance_usd"]))>0.01 for row in curve[1:-1])
+    assert curve[-1]["equity_usd"]==curve[-1]["balance_usd"]
+    assert curve[-1]["equity_usd"]==result["metrics"]["ending_capital_usd"]
