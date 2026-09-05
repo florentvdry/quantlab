@@ -9,7 +9,8 @@ DEFAULTS={
     "commission_bps":6.0,"slippage_bps":5.0,"gross_exposure":2.0,
     "initial_capital":100000.0,"adaptive_lookback_days":252,
     "long_gross":None,"short_gross":None,"rank_buffer":0,
-    "rebalance_threshold_pct":0.0,"min_trade_notional":0.0
+    "rebalance_threshold_pct":0.0,"min_trade_notional":0.0,
+    "max_abs_weight":None
 }
 BASELINE_DEFAULTS=DEFAULTS|{"long_count":20,"short_count":20}
 V4_DEFAULTS={
@@ -235,6 +236,10 @@ def run_backtest(params:dict|None=None,score_column="meta_score",strategy_name="
                     weights.update({s:-short_gross*float(scales.loc[s])/len(shorts) for s in shorts.index})
             else:
                 weights.update({s:-short_gross/len(shorts) for s in shorts.index})
+        max_abs_weight=p.get("max_abs_weight")
+        if max_abs_weight is not None:
+            cap=max(0.0,float(max_abs_weight))
+            weights={s:float(np.clip(w,-cap,cap)) for s,w in weights.items()}
         weights={s:w for s,w in weights.items() if abs(w)>1e-12}
 
         entry=by_date.get(entry_d);exit_=by_date.get(exit_d)
