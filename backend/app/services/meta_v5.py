@@ -421,7 +421,8 @@ def build_meta_v5_oos(
     """
     source = build_feature_panel() if panel is None else panel.copy()
     source = _regime_frame(source).sort_values(["date", "symbol"])
-    labelled = source.dropna(subset=MODEL_FEATURES + ["future_relative_20d"]).copy()
+    eligible_mask=source["solid_eligible"].fillna(False).astype(bool) if "solid_eligible" in source.columns else pd.Series(True,index=source.index)
+    labelled = source[eligible_mask].dropna(subset=MODEL_FEATURES + ["future_relative_20d"]).copy()
     all_dates = np.array(sorted(source["date"].unique()))
 
     min_train = int(V5_CONFIG["min_train_days"])
@@ -528,6 +529,8 @@ def build_meta_v5_oos(
             continue
 
         current = by_date[signal_date].dropna(subset=MODEL_FEATURES).copy()
+        if "solid_eligible" in current.columns:
+            current=current[current["solid_eligible"].fillna(False).astype(bool)].copy()
         if current.empty:
             continue
 
