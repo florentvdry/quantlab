@@ -86,6 +86,19 @@ Le parcours normal ne demande plus de lancer une succession de boutons. L'Autopi
 
 Le polling UI ne synchronise plus Alpaca à chaque rafraîchissement : compte, positions, jobs, validations, facteurs et datasets sont lus depuis PostgreSQL / Redis / Feature Store local. Les appels broker réseau restent réservés aux synchronisations et opérations explicites.
 
+## META V6 — challenger expérimental
+
+V5 reste le benchmark de contrôle. V6 est un challenger research-only qui cherche surtout à améliorer Sharpe et drawdown sans modifier Paper :
+
+- cible alpha alignée sur l'exécution réelle : signal close T, entrée open T+1, sortie open T+11 ;
+- meta-label absolu : le trade doit être positif après coût round-trip estimé, pas seulement battre le marché ;
+- contexte marché : breadth, dispersion, volatilité, tendance et régime ;
+- choix du seuil de probabilité et du nombre maximal de positions sur validation passée uniquement ;
+- sizing de confiance plus sélectif avec possibilité de rester davantage en cash ;
+- stress tests coûts x2/x3 et variantes de construction de portefeuille.
+
+V6 n'est pas utilisé par l'Autopilot ni par les signaux Paper tant qu'il n'a pas démontré une amélioration robuste par rapport à V5.
+
 ## Autopilot / workflow recommandé
 
 Avec `AUTO_BOOTSTRAP_ENABLED=true` (défaut), aucun bouton n'est requis pour initialiser QuantLab. Au démarrage, le scheduler lance automatiquement si nécessaire :
