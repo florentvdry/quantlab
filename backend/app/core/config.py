@@ -9,5 +9,6 @@ class Settings(BaseSettings):
     trading_env:str='PAPER'; paper_auto_enabled:bool=False; allow_alpaca_paper_orders:bool=False
     paper_auto_weekday:int=0; paper_auto_hour_et:int=9; paper_auto_minute_et:int=35; paper_auto_top_n:int=20
     daily_pipeline_enabled:bool=True; daily_pipeline_hour_et:int=18; daily_pipeline_minute_et:int=15; daily_sec_refresh_weekday:int=5
+    auto_bootstrap_enabled:bool=True
     model_config=SettingsConfigDict(env_file='.env',extra='ignore')
 settings=Settings()
