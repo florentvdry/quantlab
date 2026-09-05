@@ -1,9 +1,18 @@
 from __future__ import annotations
 import os, pandas as pd
 from app.core.config import settings
-from app.services.features import build_feature_panel
+from app.services.features import build_feature_panel, feature_store_status
 
 def report():
+    fs=feature_store_status()
+    if not fs["ready"]:
+        return {
+            "status":"NOT_READY",
+            "data_mode":settings.data_mode,
+            "latest_date":None,
+            "checks":[{"name":"feature_store_ready","ok":False,"detail":fs["message"],"severity":"critical"}],
+            "feature_store":fs,
+        }
     df=build_feature_panel(); latest=pd.Timestamp(df.date.max()); snap=df[df.date==latest]
     checks=[]
     def add(name,ok,detail,severity='critical'):checks.append({'name':name,'ok':bool(ok),'detail':detail,'severity':severity})
