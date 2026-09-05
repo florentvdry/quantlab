@@ -744,3 +744,53 @@ def test_point_in_time_solid_gate_allows_bounded_negative_equity(monkeypatch):
     panel=sf.point_in_time_panel(["BUYBACK"],dates)
     assert bool(panel.iloc[0]["solid_fundamental_eligible"])
     assert pd.isna(panel.iloc[0]["roe"])
+
+
+def test_v7_base_backtest_can_be_persisted_then_enriched():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.db.session import Base
+    from app.models.entities import BacktestRun
+    from app.services.jobs import _persist_backtest,_update_persisted_backtest
+
+    engine=create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    Session=sessionmaker(bind=engine)
+    db=Session()
+    try:
+        base={
+            "strategy":"META V7 test",
+            "metrics":{
+                "cagr":0.12,"sharpe":1.1,"max_drawdown":-0.08,
+                "volatility":0.14,"avg_turnover_per_rebalance":0.2,
+            },
+            "meta_v7":{"simulation":{"coverage_ratio":0.7}},
+        }
+        backtest_id=_persist_backtest(db,base)
+        assert db.get(BacktestRun,backtest_id) is not None
+
+        enriched={
+            **base,
+            "backtest_id":backtest_id,
+            "meta_v7_validation":{"scenarios":[{"scenario":"base","sharpe":1.1}]},
+        }
+        _update_persisted_backtest(db,backtest_id,enriched)
+        payload=__import__("json").loads(db.get(BacktestRun,backtest_id).payload_json)
+        assert payload["backtest_id"]==backtest_id
+        assert payload["meta_v7_validation"]["scenarios"][0]["scenario"]=="base"
+    finally:
+        db.close()
+
+
+def test_snapshot_job_exposes_backtest_id_while_stresses_continue():
+    from app.models.entities import JobRun
+    from app.services.app_snapshot import _job
+
+    row=JobRun(
+        id=1,job_key="job-1",kind="META_V7",status="RUNNING",progress=84,
+        result_json='{"message":"META V7 base persisté — stress tests en cours","backtest_id":42,"model_version_id":9}',
+    )
+    summary=_job(row)
+    assert summary["backtest_id"]==42
+    assert summary["model_version_id"]==9
+    assert summary["progress"]==84
