@@ -47,6 +47,7 @@ export default function Home(){
   const [explain,setExplain]=useState(null)
   const [selectedBacktest,setSelectedBacktest]=useState(null)
   const [metaSignals,setMetaSignals]=useState(null)
+  const [lastJobKey,setLastJobKey]=useState(null)
   const [cfg,setCfg]=useState({long_count:20,short_count:20,rebalance_days:5,commission_bps:6,slippage_bps:5,gross_exposure:2,initial_capital:100000,adaptive_lookback_days:252})
 
   const request=async(path,opt)=>{
@@ -81,12 +82,15 @@ export default function Home(){
 
   const activeJobs=useMemo(()=>jobs.filter(j=>j.status==='QUEUED'||j.status==='RUNNING'),[jobs])
   const latestActive=activeJobs[0]
+  const trackedJob=useMemo(()=>lastJobKey?jobs.find(j=>j.job_key===lastJobKey):null,[jobs,lastJobKey])
+  const displayJob=trackedJob||latestActive
 
   const flash=(text,type='info')=>{setMsg(text);setMsgType(type)}
   const postJob=async(path,label,body=cfg)=>{
     flash(label+' — mise en file…','loading')
     try{
       const x=await request(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      setLastJobKey(x.job_key)
       flash(label+' ajouté à la file ('+x.job_key.slice(0,8)+')','success')
       await load(true)
     }catch(e){flash(label+' — '+e.message,'error')}
@@ -113,18 +117,22 @@ export default function Home(){
   const tabs=['Overview','Data','Research','Models','Backtests','Validation','Signals','Paper','System']
   return <main className="wrap">
     <header className="head">
-      <div><h1>Quant Lab <span className="muted">V1.1</span></h1><div className="muted">Data → Research → Validation → Strategy → Alpaca Paper</div></div>
+      <div><h1>Quant Lab <span className="muted">V1.2</span></h1><div className="muted">Data → Research → Validation → Strategy → Alpaca Paper</div></div>
       <div className="headState"><b>{sys?.data_mode?.toUpperCase()}</b><span>/ PAPER</span><span className={sys?.paper_orders_enabled?'dangerText':'positive'}>{sys?.paper_orders_enabled?'ARMED':'LOCKED'}</span></div>
     </header>
 
     <nav className="tabs">{tabs.map(x=><button key={x} className={tab===x?'active':''} onClick={()=>setTab(x)}>{x}</button>)}</nav>
 
-    {(msg||latestActive)&&<div className={'statusBanner '+(latestActive?'loading':msgType)}>
-      {(latestActive||msgType==='loading')&&<span className="spinner small"/>}
+    {(msg||displayJob)&&<div className={'statusBanner '+(displayJob?(displayJob.status==='FAILED'?'error':displayJob.status==='COMPLETED'?'success':'loading'):msgType)}>
+      {(displayJob&&(displayJob.status==='QUEUED'||displayJob.status==='RUNNING')||(!displayJob&&msgType==='loading'))&&<span className="spinner small"/>}
       <div className="grow">
-        <b>{latestActive?(JOB_LABELS[latestActive.kind]||latestActive.kind)+' — '+(STATUS_LABELS[latestActive.status]||latestActive.status):msg}</b>
-        {latestActive&&<><div className="muted mini">{latestActive.message||('Progression '+latestActive.progress+'%')}</div><div className="progress"><span style={{width:Math.max(3,latestActive.progress||0)+'%'}}/></div></>}
+        <b>{displayJob?(JOB_LABELS[displayJob.kind]||displayJob.kind)+' — '+(STATUS_LABELS[displayJob.status]||displayJob.status):msg}</b>
+        {displayJob&&<><div className={(displayJob.status==='FAILED'?'negative':'muted')+' mini'}>{displayJob.error||displayJob.message||('Progression '+displayJob.progress+'%')}</div><div className="progress"><span style={{width:Math.max(3,displayJob.progress||0)+'%'}}/></div></>}
       </div>
+    </div>}
+
+    {setup&&!setup.research_unlocked&&<div className="statusBanner warning">
+      <div className="grow"><b>Données de recherche pas encore prêtes</b><div className="muted mini">{setup.feature_store?.message||'Le Feature Store doit être construit.'} Un job de backtest/recherche le reconstruira désormais automatiquement.</div></div>
     </div>}
 
     {tab==='Overview'&&<>
@@ -141,7 +149,7 @@ export default function Home(){
         <Card title="Actions">
           <div className="actionGrid">
             <button className="btn" disabled={busy||activeJobs.some(j=>j.kind==='DAILY_PIPELINE')} onClick={()=>postJob('/api/jobs/daily-pipeline?force_market=true','Daily Pipeline',{})}>{activeJobs.some(j=>j.kind==='DAILY_PIPELINE')?'Pipeline en cours…':'Run Daily Pipeline'}</button>
-            <button className="btn" onClick={()=>postJob('/api/jobs/v4-backtest','META V4 Low-Turnover',{})}>META V4 Low-Turnover</button><button className="btn2" onClick={()=>postJob('/api/jobs/adaptive-backtest','Adaptive META V3')}>Adaptive V3</button>
+            <button className="btn" onClick={()=>postJob('/api/jobs/meta-v5','META Ensemble V5')}>Run META V5</button><button className="btn2" onClick={()=>postJob('/api/jobs/v4-backtest','META V4 Low-Turnover',{})}>META V4</button>
             <button className="btn2" onClick={()=>postJob('/api/jobs/validation','Validation Gate')}>Run Validation</button>
             <button className="btn2" onClick={()=>setTab('Research')}>Open Research</button>
           </div>
@@ -157,7 +165,7 @@ export default function Home(){
           {!Object.keys(datasets||{}).length?<Empty>Lance le Daily Pipeline.</Empty>:<table><thead><tr><th>Layer</th><th>Version</th><th>Latest</th><th>Rows</th></tr></thead><tbody>{Object.entries(datasets).map(([k,v])=><tr key={k}><td>{k}</td><td>{v.version||v.status||'—'}</td><td>{v.latest||'—'}</td><td>{v.rows||'—'}</td></tr>)}</tbody></table>}
         </Card>
         <Card title="Data Quality">
-          {!quality?<Empty>Pas de rapport.</Empty>:<><div className="big">{quality.status}</div>{(quality.checks||[]).map(c=><div className="checkRow" key={c.name}><Pill ok={c.ok}>{c.ok?'PASS':'WARN'}</Pill><span>{c.name}</span></div>)}</>}
+          {!quality?<Empty>Pas de rapport.</Empty>:<><div className="big">{quality.status}</div>{quality.status==='NOT_READY'&&<p className="muted mini">{quality.feature_store?.message||'Feature Store non prêt.'}</p>}{(quality.checks||[]).map(c=><div className="checkRow" key={c.name}><Pill ok={c.ok}>{c.ok?'PASS':'WARN'}</Pill><span>{c.name}</span></div>)}</>}
         </Card>
       </div>
       <Card title="Data operations" className="section"><div className="row">
