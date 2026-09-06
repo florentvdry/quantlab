@@ -17,7 +17,7 @@ PAPER_THRESHOLDS = {
     "robust_min_sharpe": 0.0,
     "min_acceptance_rate": 0.10,
     "max_acceptance_rate": 0.80,
-    "min_live_like_coverage": 0.65,
+    "min_post_startup_coverage": 0.95,
     "min_median_eligible_symbols": 25,
 }
 
@@ -65,8 +65,12 @@ def validation_report(params=None, progress=None, panel=None, bundle=None):
             "detail": candidate.get("dataset", {}).get("historical_news"),
         },
         {
-            "name": "live_like_coverage_at_least_65pct",
-            "ok": (research.get("simulation", {}).get("coverage_ratio") or 0.0) >= PAPER_THRESHOLDS["min_live_like_coverage"],
+            "name": "post_startup_coverage_at_least_95pct",
+            "ok": (
+                research.get("simulation", {}).get("post_startup_coverage_ratio")
+                if research.get("simulation", {}).get("post_startup_coverage_ratio") is not None
+                else research.get("simulation", {}).get("coverage_ratio")
+            ) >= PAPER_THRESHOLDS["min_post_startup_coverage"],
             "detail": research.get("simulation", {}),
         },
         {
