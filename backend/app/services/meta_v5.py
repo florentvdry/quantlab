@@ -439,6 +439,16 @@ def build_meta_v5_oos(
         if cached is not None:
             cached_scored,cached_research,cached_meta=cached
             cached_research=dict(cached_research)
+            sim=dict(cached_research.get("simulation") or {})
+            if "post_startup_coverage_ratio" not in sim:
+                total=int(sim.get("feature_valid_sessions") or 0)
+                startup=int(sim.get("initial_startup_sessions") or 0)
+                live=int(sim.get("live_like_sessions") or 0)
+                expected=max(0,total-startup)
+                sim["coverage_ratio_including_startup"]=sim.get("coverage_ratio")
+                sim["expected_post_startup_sessions"]=expected
+                sim["post_startup_coverage_ratio"]=round(float(live/expected),4) if expected else 0.0
+                cached_research["simulation"]=sim
             cached_research["cache"]={
                 "hit":True,
                 "version":V5_CACHE_VERSION,
@@ -613,6 +623,12 @@ def build_meta_v5_oos(
     daily = _daily_ic(scored, "v5_smooth_score")
     accepted = oos["v5_trade_score"].notna()
     scored_dates = np.array(sorted(oos["date"].unique()))
+    expected_post_startup_dates=all_dates[first_score_idx:] if first_score_idx<len(all_dates) else np.array([])
+    post_startup_coverage=(
+        float(len(scored_dates)/len(expected_post_startup_dates))
+        if len(expected_post_startup_dates)
+        else 0.0
+    )
 
     summary = {
         "name": "META Ensemble v5",
@@ -626,6 +642,9 @@ def build_meta_v5_oos(
             "feature_valid_sessions": int(len(all_dates)),
             "live_like_sessions": int(len(scored_dates)),
             "coverage_ratio": round(float(len(scored_dates) / len(all_dates)), 4),
+            "coverage_ratio_including_startup": round(float(len(scored_dates) / len(all_dates)), 4),
+            "post_startup_coverage_ratio": round(post_startup_coverage, 4),
+            "expected_post_startup_sessions": int(len(expected_post_startup_dates)),
             "initial_startup_sessions": int(first_score_idx),
             "min_train_days": min_train,
             "validation_days": validation_days,
