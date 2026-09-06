@@ -46,7 +46,7 @@ function BacktestDetail({detail,registry,fetchBacktest}){
           <div><div className="text-slate-600">Features valides</div><div className="mt-1 text-slate-300">{simulation.feature_valid_from}</div></div>
           <div><div className="text-slate-600">Premier score live-like</div><div className="mt-1 text-slate-300">{simulation.first_live_like_score}</div></div>
           <div><div className="text-slate-600">Dernier score</div><div className="mt-1 text-slate-300">{simulation.last_live_like_score}</div></div>
-          <div><div className="text-slate-600">Couverture simulée</div><div className="mt-1 text-slate-300">{pct(simulation.coverage_ratio)}</div></div>
+          <div><div className="text-slate-600">Couverture post-startup</div><div className="mt-1 text-slate-300">{pct(simulation.post_startup_coverage_ratio??simulation.coverage_ratio)}{simulation.coverage_ratio_including_startup!=null&&<span className="ml-1 text-[10px] text-slate-600">({pct(simulation.coverage_ratio_including_startup)} total)</span>}</div></div>
           <div><div className="text-slate-600">Refresh / Rebalance</div><div className="mt-1 text-slate-300">{simulation.model_refresh_days}j / {simulation.rebalance_days}j</div></div>
         </div>
         <div className="mt-3 text-[11px] leading-5 text-slate-500">Pas de holdout fixe : après le démarrage minimal, chaque date est simulée chronologiquement avec uniquement les données alors connues.</div>
