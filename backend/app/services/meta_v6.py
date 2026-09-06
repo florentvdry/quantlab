@@ -451,6 +451,16 @@ def build_meta_v6_oos(
         if cached is not None:
             cached_scored,cached_research,cached_meta=cached
             cached_research=dict(cached_research)
+            sim=dict(cached_research.get("simulation") or {})
+            if "post_startup_coverage_ratio" not in sim:
+                total=int(sim.get("feature_valid_sessions") or 0)
+                startup=int(sim.get("initial_startup_sessions") or 0)
+                live=int(sim.get("live_like_sessions") or 0)
+                expected=max(0,total-startup)
+                sim["coverage_ratio_including_startup"]=sim.get("coverage_ratio")
+                sim["expected_post_startup_sessions"]=expected
+                sim["post_startup_coverage_ratio"]=round(float(live/expected),4) if expected else 0.0
+                cached_research["simulation"]=sim
             cached_research["cache"]={
                 "hit":True,
                 "version":V6_CACHE_VERSION,
