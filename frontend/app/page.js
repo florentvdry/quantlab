@@ -77,6 +77,21 @@ export default function Home(){
     setSelectedBacktest(current=>current===candidateJob.backtest_id?current:candidateJob.backtest_id)
   },[candidateJob?.backtest_id])
 
+  useEffect(()=>{
+    if(!candidateJob?.backtest_id)return
+    if(selectedBacktest!==candidateJob.backtest_id)return
+    let mounted=true
+    api('/api/backtests/'+candidateJob.backtest_id,{},12000)
+      .then(data=>{if(mounted)setBacktestDetail(data)})
+      .catch(e=>{if(mounted)setError(e.message)})
+    return()=>{mounted=false}
+  },[
+    candidateJob?.backtest_id,
+    candidateJob?.updated_at,
+    candidateJob?.status,
+    selectedBacktest,
+  ])
+
   const refreshAll=async()=>{
     setRefreshing(true)
     try{
